@@ -1,0 +1,49 @@
+:root {
+  --paper: #f5f3ec;
+  --ink: #282923;
+  --muted: #77776d;
+  --muted-soft: #99958a;
+  --line: #e5e1d7;
+  --vermilion: #a94e38;
+  --vermilion-dark: #8f3f2c;
+  --japanese-font: "Yu Gothic UI", "Hiragino Kaku Gothic ProN", Meiryo, "Noto Sans JP", sans-serif;
+  font-family: Inter, "Segoe UI", var(--japanese-font);
+  color: var(--ink);
+  background: var(--paper);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-optical-sizing: auto;
+  font-weight: 400;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  min-height: 100%;
+  background: var(--paper);
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  color: #fffaf4;
+  background: #a94e38;
+}
