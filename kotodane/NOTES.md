@@ -2,7 +2,7 @@
 
 ## Summary
 
-Local-first Japanese reading tutor for a beginner learner. Phase 0 establishes the project structure and verifies the initial Python dependencies.
+Local-first Japanese reading tutor for a beginner learner. Phase 0 established the project structure; Phase 1 adds Japanese tokenization and kanji-aware rendering.
 
 ## Stack
 
@@ -23,6 +23,7 @@ kotodane/
 │   ├── llm.py
 │   ├── main.py
 │   ├── requirements.txt
+│   ├── test_tokenizer.py
 │   └── tokenizer.py
 ├── frontend/  (empty in Phase 0)
 ├── .gitignore
@@ -54,13 +55,16 @@ Open `http://127.0.0.1:8000/docs` for Swagger UI and `http://127.0.0.1:8000/heal
 python check_setup.py
 ```
 
+Phase 1 adds `POST /render`, which accepts `{"text": "...", "known_kanji": ["私"]}` and returns tokenizer results. Run tokenizer tests from `backend` with `python -m pytest test_tokenizer.py` (install `pytest` in the virtual environment if needed).
+
 ## Decisions
 
-- Phase 0 contains only the health endpoint and dependency setup check; application logic is deferred.
-- The backend modules other than `main.py` are placeholders for later phases.
+- Phase 0 contains the health endpoint and dependency setup check.
+- Phase 1 adds tokenization and rendering; the database, dictionary, and LLM modules remain placeholders for later phases.
 - CORS permits the Vite development origin `http://localhost:5173`.
 
 ## Phases-completed checklist
 
 - [x] Phase 0: project setup
+- [x] Phase 1: tokenizer and `/render`
 - [ ] Later phases: application features

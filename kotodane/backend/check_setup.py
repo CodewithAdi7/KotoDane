@@ -1,5 +1,11 @@
+import sys
+
 from fugashi import Tagger
 from jamdict import Jamdict
+
+# Print Japanese text reliably in Windows terminals using legacy encodings.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
 sentence = "私は日本語を勉強しています"

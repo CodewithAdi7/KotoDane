@@ -1,7 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from tokenizer import mask_text
 
 app = FastAPI()
+
+
+class RenderRequest(BaseModel):
+    text: str
+    known_kanji: list[str]
 
 app.add_middleware(
     CORSMiddleware,
@@ -15,3 +23,8 @@ app.add_middleware(
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/render")
+def render(request: RenderRequest):
+    return {"tokens": mask_text(request.text, set(request.known_kanji))}
