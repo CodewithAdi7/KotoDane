@@ -2,7 +2,7 @@
 
 ## Summary
 
-Local-first Japanese reading tutor for a beginner learner. Phase 0 established the project structure; Phase 1 added Japanese tokenization and kanji-aware rendering; Phase 2 added local dictionary lookup; Phase 3 added persistent known-kanji and vocabulary-card endpoints; Phase 4 adds the display-only reader UI.
+Local-first Japanese reading tutor for a beginner learner. Phase 0 established the project structure; Phase 1 added Japanese tokenization and kanji-aware rendering; Phase 2 added local dictionary lookup; Phase 3 added persistent known-kanji and vocabulary-card endpoints; Phase 4 added the reader UI; Phase 5 added word lookup and known-kanji management; Phase 6 connects word lookup to saved vocabulary cards.
 
 ## Stack
 
@@ -74,7 +74,7 @@ Phase 2 adds `GET /lookup?word=食べる` for exact local dictionary lookup. Run
 
 Phase 3 creates `kotodane.db` in the project folder on first API startup. Use `GET /known-kanji`, `PUT /known-kanji`, `POST /known-kanji/seed`, `GET /cards`, and `POST /cards` to manage the local study data. The seed route inserts about 80 common beginner kanji and is safe to call more than once.
 
-Run the reader UI in a second PowerShell terminal with `cd frontend`, `npm install`, and `npm run dev`. The Vite app reads its backend base URL from `frontend/.env` (`VITE_API_URL=http://localhost:8000`). Paste Japanese text and press **Render text**; the UI loads the saved known kanji and sends the text to `POST /render`. Check the frontend compiles with `npm run build`.
+Run the reader UI in a second PowerShell terminal with `cd frontend`, `npm install`, and `npm run dev`. The Vite app reads its backend base URL from `frontend/.env` (`VITE_API_URL=http://localhost:8000`). Paste Japanese text and press **Render text**; the UI loads the saved known kanji and sends the text to `POST /render`. Tap a word in the reading view to open its local dictionary entry and save a vocabulary card with the word's reading, first dictionary meaning, and source sentence. Use the **Kanji** tab to seed the starter list, add a character, or toggle a character's known status; the displayed passage re-renders when the list changes. Open **Cards** to review saved words and tap counts. Cards persist in `kotodane.db` across server restarts. Check the frontend compiles with `npm run build`.
 
 ## Decisions
 
@@ -82,7 +82,8 @@ Run the reader UI in a second PowerShell terminal with `cd frontend`, `npm insta
 - Phase 1 adds tokenization and rendering; the database and LLM modules remain placeholders for later phases.
 - Phase 2 loads one cached Jamdict instance at API startup and returns up to five common-first word entries plus KANJIDIC2 details for kanji in the query.
 - Phase 3 uses SQLite with foreign keys and creates one card per unique lemma; posting a known lemma again increments its tap count.
-- Phase 4 is a single display-only reader page; kanji management, lookup popups, and routing are deferred.
+- Phase 4 introduced the React reader page and Phase 5 adds simple Reader/Kanji tabs, tap-to-lookup details, and known-kanji controls using the existing API.
+- Phase 6 saves looked-up words through the existing `/cards` endpoint and adds a Cards view; repeat lookups reuse the lemma's card and increment its tap count.
 - CORS permits the Vite development origin `http://localhost:5173`.
 
 ## Phases-completed checklist
@@ -92,4 +93,6 @@ Run the reader UI in a second PowerShell terminal with `cd frontend`, `npm insta
 - [x] Phase 2: dictionary and `/lookup`
 - [x] Phase 3: SQLite, known kanji, and cards
 - [x] Phase 4: React reader UI
+- [x] Phase 5: tap-to-lookup and kanji manager
+- [x] Phase 6: saved vocabulary cards
 - [ ] Later phases: application features

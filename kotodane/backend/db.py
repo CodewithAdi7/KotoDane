@@ -152,8 +152,8 @@ def create_or_tap_card(
 
         if word is None:
             cursor = connection.execute(
-                """INSERT INTO words (lemma, reading, first_seen)
-                   VALUES (?, ?, ?)""",
+                """INSERT INTO words (lemma, reading, first_seen, tap_count)
+                   VALUES (?, ?, ?, 1)""",
                 (lemma, reading, now),
             )
             word_id = cursor.lastrowid

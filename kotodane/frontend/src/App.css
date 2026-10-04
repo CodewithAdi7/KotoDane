@@ -16,6 +16,10 @@
   border-bottom: 1px solid var(--line);
 }
 
+.tabs { display: flex; align-self: stretch; align-items: center; gap: 5px; }
+.tab { height: 38px; padding: 0 15px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); font-size: 13px; cursor: pointer; }
+.tab:hover, .tab.is-active { border-color: var(--line); background: rgba(255, 254, 250, .72); color: var(--ink); }
+
 .brand {
   display: inline-flex;
   align-items: center;
@@ -61,7 +65,7 @@
 }
 
 .reader-layout {
-  width: min(820px, calc(100% - 48px));
+  width: min(920px, calc(100% - 48px));
   margin: 0 auto;
   padding: 62px 0 36px;
 }
@@ -318,6 +322,60 @@
   text-decoration-skip-ink: none;
 }
 
+.word-button { display: inline; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; line-height: inherit; cursor: pointer; }
+.word-button:hover { color: var(--vermilion); }
+.word-button:focus-visible, .kanji-tile:focus-visible, .tab:focus-visible { outline: 2px solid #bb806d; outline-offset: 3px; border-radius: 4px; }
+.lookup-panel, .manager-card { margin-top: 18px; padding: 23px 25px; border: 1px solid var(--line); border-radius: 15px; background: rgba(255, 254, 250, .92); box-shadow: 0 14px 36px rgba(54, 47, 34, .045); }
+.lookup-topline, .manager-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding-bottom: 15px; border-bottom: 1px solid #efede6; }
+.lookup-topline h2, .manager-heading h2 { margin: 6px 0 0; color: var(--ink); font-size: 22px; font-weight: 650; }
+.close-button { width: 32px; height: 32px; border: 1px solid var(--line); border-radius: 50%; background: transparent; color: var(--muted); font-size: 22px; line-height: 1; cursor: pointer; }
+.lookup-meta { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 0; }
+.lookup-meta span { padding: 5px 9px; border-radius: 999px; background: #f1eee5; color: #686458; font-size: 12px; }
+.original-toggle { display: flex; align-items: center; gap: 8px; margin-top: 15px; color: var(--muted); font-size: 12px; }
+.original-toggle input { accent-color: var(--vermilion); }
+.lookup-status { margin: 18px 0 5px; color: var(--muted); font-size: 13px; }
+.dictionary-entry { position: relative; padding: 17px 0; border-bottom: 1px solid #efede6; }
+.entry-forms { margin: 0; font-family: var(--japanese-font); font-size: 18px; }
+.entry-forms span { margin-left: 11px; color: var(--muted); font-size: 14px; }
+.common-badge { display: inline-block; margin-top: 7px; padding: 3px 7px; border-radius: 999px; background: #eaf0e4; color: #596b50; font-size: 10px; }
+.sense { margin-top: 11px; }
+.sense-pos { margin: 0; color: var(--muted); font-size: 11px; }
+.sense ul { margin: 5px 0 0; padding-left: 20px; color: var(--ink); font-size: 13px; line-height: 1.65; }
+.kanji-breakdown { padding-top: 18px; }
+.kanji-detail { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid #efede6; }
+.kanji-detail > strong { width: 38px; color: var(--vermilion); font-family: var(--japanese-font); font-size: 29px; font-weight: 500; text-align: center; }
+.kanji-detail p { margin: 0 0 4px; font-size: 13px; }
+.kanji-detail span { color: var(--muted); font-size: 11px; }
+.manager-layout { width: min(920px, calc(100% - 48px)); margin: 0 auto; padding: 62px 0 36px; }
+.cards-layout { width: min(920px, calc(100% - 48px)); margin: 0 auto; padding: 62px 0 36px; }
+.cards-card { margin-top: 18px; padding: 23px 25px; border: 1px solid var(--line); border-radius: 15px; background: rgba(255, 254, 250, .92); box-shadow: 0 14px 36px rgba(54, 47, 34, .045); }
+.saved-indicator { margin: 0 0 12px; color: #536b4d; font-size: 12px; font-weight: 650; }
+.save-error { margin: 0 0 12px; color: #813e30; font-size: 12px; }
+.saved-card-list { display: grid; gap: 10px; padding-top: 18px; }
+.saved-card { padding: 17px 18px; border: 1px solid #ebe7de; border-radius: 10px; background: #fffefa; }
+.saved-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.saved-card-heading h3 { margin: 0; color: var(--ink); font-family: var(--japanese-font); font-size: 22px; font-weight: 550; }
+.saved-card-heading > div > span { display: inline-block; margin-top: 3px; color: var(--muted); font-family: var(--japanese-font); font-size: 13px; }
+.tap-count { padding: 5px 8px; border-radius: 999px; background: #f1eee5; color: #766a5c; font-size: 10px; white-space: nowrap; }
+.saved-meaning { margin: 13px 0 0; color: var(--ink); font-size: 13px; }
+.saved-sentence { margin: 11px 0 0; padding-top: 10px; border-top: 1px solid #efede6; color: #605d54; font-family: var(--japanese-font); font-size: 15px; line-height: 1.7; }
+.secondary-button, .text-button { border: 0; background: transparent; color: var(--vermilion); font-size: 12px; font-weight: 650; cursor: pointer; }
+.secondary-button { padding: 9px 12px; border: 1px solid #e6d8cc; border-radius: 7px; }
+.secondary-button:disabled { opacity: .55; cursor: wait; }
+.add-kanji-form { display: flex; gap: 9px; padding: 19px 0; border-bottom: 1px solid #efede6; }
+.add-kanji-form input { width: min(280px, 60%); min-height: 42px; padding: 0 12px; border: 1px solid #e6e3da; border-radius: 8px; background: #fffefa; color: var(--ink); font-family: var(--japanese-font); font-size: 18px; }
+.add-kanji-form .render-button { min-height: 42px; }
+.kanji-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 9px; padding-top: 18px; }
+.kanji-tile { min-height: 88px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--line); border-radius: 9px; background: #fffefa; color: var(--muted); cursor: pointer; transition: border-color 130ms ease, background 130ms ease, transform 130ms ease; }
+.kanji-tile:hover { transform: translateY(-1px); border-color: #cda593; }
+.kanji-tile.is-known { border-color: #d9e2d3; background: #f3f6ef; color: #53664b; }
+.kanji-character { color: var(--ink); font-family: var(--japanese-font); font-size: 29px; line-height: 1.1; }
+.kanji-status { font-size: 10px; }
+.manager-empty { min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; }
+.manager-empty p { margin: 0; color: var(--ink); font-size: 13px; font-weight: 620; }
+.manager-empty > span:last-child { color: var(--muted-soft); font-size: 11px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
 .message {
   display: flex;
   gap: 12px;
@@ -374,6 +432,10 @@
     height: 68px;
   }
 
+  .tabs { gap: 0; }
+  .tab { padding: 0 9px; font-size: 12px; }
+  .brand-name { font-size: 17px; }
+
   .local-indicator {
     font-size: 11px;
   }
@@ -382,6 +444,9 @@
     width: calc(100% - 32px);
     padding: 43px 0 25px;
   }
+
+  .manager-layout { width: calc(100% - 32px); padding: 43px 0 25px; }
+  .cards-layout { width: calc(100% - 32px); padding: 43px 0 25px; }
 
   .intro {
     margin-bottom: 23px;
@@ -396,10 +461,19 @@
   }
 
   .reader-card,
-  .output-card {
+  .output-card,
+  .lookup-panel,
+  .manager-card {
     padding-right: 16px;
     padding-left: 16px;
   }
+
+  .lookup-panel, .manager-card { padding-top: 18px; padding-bottom: 18px; }
+  .cards-card { padding: 18px 16px; }
+  .manager-heading { align-items: center; }
+  .secondary-button { padding: 8px; font-size: 11px; }
+  .kanji-grid { grid-template-columns: repeat(auto-fill, minmax(66px, 1fr)); }
+  .kanji-tile { min-height: 76px; }
 
   .text-input {
     min-height: 150px;
