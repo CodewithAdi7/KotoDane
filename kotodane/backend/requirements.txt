@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+fugashi
+unidic-lite
+jamdict
+jamdict-data
