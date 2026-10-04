@@ -2,7 +2,7 @@
 
 ## Summary
 
-Local-first Japanese reading tutor for a beginner learner. Phase 0 established the project structure; Phase 1 added Japanese tokenization and kanji-aware rendering; Phase 2 added local dictionary lookup; Phase 3 added persistent known-kanji and vocabulary-card endpoints; Phase 4 added the reader UI; Phase 5 added word lookup and known-kanji management; Phase 6 connects word lookup to saved vocabulary cards; Phase 7 adds local manga OCR; Phase 8 connects page cropping, OCR, reading, and card thumbnails; Phases L1-L4 add local Ollama explanations, level guardrails, practice examples, casual-speech explanations, and the frontend AI Tutor panel; Phase L5 adds short-clip Whisper transcription and masked transcript review; Phase 9a adds FSRS review scheduling for vocabulary cards.
+Local-first Japanese reading tutor for a beginner learner. Phase 0 established the project structure; Phase 1 added Japanese tokenization and kanji-aware rendering; Phase 2 added local dictionary lookup; Phase 3 added persistent known-kanji and vocabulary-card endpoints; Phase 4 added the reader UI; Phase 5 added word lookup and known-kanji management; Phase 6 connects word lookup to saved vocabulary cards; Phase 7 adds local manga OCR; Phase 8 connects page cropping, OCR, reading, and card thumbnails; Phases L1-L4 add local Ollama explanations, level guardrails, practice examples, casual-speech explanations, and the frontend AI Tutor panel; Phase L5 adds short-clip Whisper transcription and masked transcript review; Phase 9a adds FSRS review scheduling; Phase 9b adds the review screen; Phase 11 adds a progress dashboard and card-based kanji suggestions; Phase 12 adds clone-and-run documentation and a self-made OCR demo page.
 
 ## Stack
 
@@ -11,6 +11,7 @@ Local-first Japanese reading tutor for a beginner learner. Phase 0 established t
 - jamdict and jamdict-data for dictionary lookup
 - manga-ocr for Japanese text recognition from images
 - python-multipart for FastAPI multipart uploads
+- Pillow for image validation and processing
 - React Image Crop for selecting manga speech-bubble crops
 - React and Vite (JavaScript) frontend
 - Ollama with Qwen3 4B for local Japanese explanations
@@ -31,6 +32,7 @@ kotodane/
 │   ├── main.py
 │   ├── ocr.py  (lazy manga-ocr model)
 │   ├── prompts.py  (LLM prompt templates and JSON schemas)
+│   ├── progress.py  (render history, kanji suggestions, dashboard stats)
 │   ├── review.py  (FSRS due-card scheduling and answers)
 │   ├── requirements.txt
 │   ├── test_dictionary.py
@@ -38,11 +40,13 @@ kotodane/
 │   ├── test_cards_notes.py
 │   ├── test_l3.py
 │   ├── test_ocr.py
+│   ├── test_progress.py
 │   ├── test_review.py
 │   ├── test_tokenizer.py
 │   ├── tokenizer.py
 │   └── uploads/  (saved bubble crops; created on first API import)
 ├── frontend/
+│   ├── .env.example
 │   ├── .env
 │   ├── index.html
 │   ├── package.json
@@ -55,6 +59,9 @@ kotodane/
 │   │   ├── index.css
 │   │   └── main.jsx
 │   └── vite.config.js
+├── sample-data/
+│   └── demo-page.png  (original sample manga page)
+├── README.md
 ├── .gitignore
 ├── LICENSE
 └── NOTES.md
@@ -121,6 +128,12 @@ Phase L5 model details for the README: `Systran/faster-whisper-small`, approxima
 
 Phase 9a adds FSRS scheduling using the `fsrs` PyPI package (Py-FSRS 6.3.2, MIT; Python 3.10+, compatible with Python 3.13). Install it with `python -m pip install -r requirements.txt`. `GET /reviews/due?limit=20` lists due cards; new unscheduled cards are due immediately. `POST /reviews/answer` accepts `{"card_id": 1, "rating": 3}` where ratings 1–4 are Again, Hard, Good, and Easy. The FSRS Card JSON and its next due timestamp are stored in the existing `cards.fsrs_state` and `cards.due_at` columns. Run scheduler tests from `backend` with `python -m pytest -q test_review.py`.
 
+Phase 9b adds the **Review** tab. It fetches `/reviews/due`, presents one card at a time with its panel image and masked sentence, and reveals the word, reading, meaning, and sentence before rating. Click or press Space to flip; rate Again, Hard, Good, or Easy with the buttons or keys 1–4. The review screen displays session progress and an all-done state. Check the frontend with `npm run build`.
+
+Phase 11 adds `GET /stats` and `GET /suggestions/kanji`, plus a Dashboard tab. Every `POST /render` records the percentage of kanji shown in the new `render_log` table; `/stats` reports the latest percentage, known kanji, words met, total cards, and due cards. Suggestions rank unknown kanji by occurrence in saved card words and sentences and include example words. Use **I learned this** to add a suggestion through `PUT /known-kanji`; the dashboard refreshes after the update. Run the focused backend checks from `backend` with `python -m pytest -q test_progress.py`; check the UI build with `npm run build`.
+
+Phase 12 adds `README.md` with clone/install/run steps, model links and licenses, troubleshooting, and a 90-second demo script. `frontend/.env.example` documents the Vite API URL. `sample-data/demo-page.png` is an original, self-made crop/OCR demo asset. The existing MIT `LICENSE` applies to this project and sample asset; third-party model and package terms remain separate. The app displays loading and readable error states for local OCR/LLM operations. Run the documented backend checks from `backend` and `npm run build` from `frontend`.
+
 Phase L2 checks generated Japanese explanation text with fugashi. Kana-only words, particles, punctuation, and whitespace are allowed; unlisted kanji trigger a retry, and unknown vocabulary above the 10% default threshold also triggers a retry. `/explain` returns `tries`, `unknown_ratio`, and `passed` alongside the explanation. Retry feedback names the words or kanji to avoid. Run the mocked guardrail tests from `backend` with `python -m pytest -q test_guardrail.py`.
 
 Phase L3 adds `POST /practice` for short target-word example sentences and `POST /explain-casual` for spoken Japanese forms and sentence endings. Both use structured Ollama JSON and the L2 guardrail loop; responses include `tries`, `unknown_ratio`, and `passed`. Practice accepts `count` from 1 to 10 (default 3). Test the mocked L3 validation and guardrail paths with `python -m pytest -q test_l3.py` from `backend`.
@@ -156,6 +169,9 @@ Run the reader UI in a second PowerShell terminal with `cd frontend`, `npm insta
 - Phase L4 connects those tutor endpoints to the Reader lookup panel, renders tutor Japanese through `/render`, allows tap-to-lookup in generated sentences, and stores duplicate-safe practice examples in a migrated `cards.notes` field.
 - Phase L5 adds `POST /transcribe` and a Listen tab. faster-whisper loads lazily, FFmpeg extracts audio from accepted media, clips over 60 seconds are rejected, and each segment is masked through the existing tokenizer with a known-card-word percentage.
 - Phase 9a uses Py-FSRS (`fsrs`) to serialize scheduler Card state into `cards.fsrs_state`, update `cards.due_at` after answers, and list unscheduled or elapsed cards from `GET /reviews/due`.
+- Phase 9b adds a mobile-friendly frontend Review tab that masks each due-card sentence, highlights the target by token lemma, and sends rating-button or 1–4 keyboard answers to the existing `/reviews/answer` endpoint.
+- Phase 11 logs kanji visibility for each `/render`, ranks unknown kanji from saved card lemmas and sentences, and shows progress and one-tap known-kanji updates on a Dashboard tab.
+- Phase 12 documents a clean Windows clone/setup path, third-party model licenses, and local inference troubleshooting; the demo crop is an original illustration.
 - Reopening an existing vocabulary card with a crop updates its image path instead of creating a duplicate card.
 - CORS permits the Vite development origin `http://localhost:5173`.
 
@@ -176,4 +192,7 @@ Run the reader UI in a second PowerShell terminal with `cd frontend`, `npm insta
 - [x] Phase L4: frontend AI Tutor panel
 - [ ] Phase L5: Whisper audio transcription (manual 30-second clip round-trip pending) This will be added later.
 - [x] Phase 9a: FSRS review scheduling
+- [ ] Phase 9b: review screen (manual full-session browser pass pending)
+- [x] Phase 11: kanji suggestions and progress dashboard
+- [x] Phase 12: polish and challenge submission materials
 - [ ] Later phases: application features

@@ -1,10 +1,18 @@
+# API server
 fastapi
 uvicorn
+
+# Japanese tokenization and dictionary lookup
 fugashi
 unidic-lite
 jamdict
 jamdict-data
+
+# OCR, image handling, and multipart uploads
 manga-ocr
+Pillow
 python-multipart
+
+# Optional listening transcription and spaced repetition
 faster-whisper
 fsrs

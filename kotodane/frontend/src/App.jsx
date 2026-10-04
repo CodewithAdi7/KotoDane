@@ -273,6 +273,13 @@ function App() {
   const sortedCatalog = useMemo(() => [...catalog].sort((a, b) => a.localeCompare(b, "ja")), [catalog]);
   const lexicalPos = (pos) => !["空白", "補助記号", "記号", "補助記号-句点", "補助記号-読点"].includes(pos);
 
+  async function handleDashboardLearned(kanji) {
+    const list = [...new Set([...knownKanji, kanji])];
+    setKnownKanji(list);
+    setCatalog((current) => [...new Set([...current, kanji])]);
+    if (text.trim()) await renderWith(list);
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -283,6 +290,8 @@ function App() {
           <button className={page === "reader" ? "tab is-active" : "tab"} onClick={() => setPage("reader")}>Reader</button>
           <button className={page === "panel" ? "tab is-active" : "tab"} onClick={() => setPage("panel")}>Panel</button>
           <button className={page === "listen" ? "tab is-active" : "tab"} onClick={() => setPage("listen")}>Listen</button>
+          <button className={page === "review" ? "tab is-active" : "tab"} onClick={() => setPage("review")}>Review</button>
+          <button className={page === "dashboard" ? "tab is-active" : "tab"} onClick={() => setPage("dashboard")}>Dashboard</button>
           <button className={page === "kanji" ? "tab is-active" : "tab"} onClick={() => setPage("kanji")}>Kanji</button>
           <button className={page === "cards" ? "tab is-active" : "tab"} onClick={() => setPage("cards")}>Cards</button>
         </nav>
@@ -331,6 +340,8 @@ function App() {
           </section>
           <footer className="page-footer"><span>Saved on this device.</span><span className="footer-dot">·</span><button className="text-button" onClick={() => setPage("reader")}>Back to reader</button></footer>
         </main>
+      ) : page === "dashboard" ? (
+        <DashboardPage knownKanji={knownKanji} onLearned={handleDashboardLearned} />
       ) : page === "listen" ? (
         <>
           <ListenPage
@@ -345,11 +356,217 @@ function App() {
           />
           {selected && <div className="listen-lookup"><LookupPanel token={selected} sentence={selectedSentence} data={lookup} loading={lookupLoading} error={lookupError} saveState={saveState} showOriginal={showOriginal} onShowOriginal={setShowOriginal} onClose={() => { setSelected(null); setLookup(null); setSaveState(null); }} knownKanji={knownKanji} savedWords={cards.map((card) => card.lemma)} lexicalPos={lexicalPos} onWordClick={(token, index, sourceTokens) => openLookup(token, index, sourceTokens, sourceTokens.map((part) => part.surface).join(""))} onSaveExample={savePracticeExample} /></div>}
         </>
+      ) : page === "review" ? (
+        <ReviewPage />
       ) : (
         <PanelPage onProcessText={processPanelText} />
       )}
     </div>
   );
+}
+
+function DashboardPage({ knownKanji, onLearned }) {
+  const [stats, setStats] = useState(null);
+  const [suggestions, setSuggestions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState("");
+  const [error, setError] = useState("");
+
+  const refresh = useCallback(async () => {
+    const [nextStats, nextSuggestions] = await Promise.all([
+      request("/stats"),
+      request("/suggestions/kanji"),
+    ]);
+    setStats(nextStats);
+    setSuggestions(nextSuggestions.suggestions || []);
+  }, []);
+
+  useEffect(() => {
+    setLoading(true);
+    refresh().catch((reason) => setError(reason.message)).finally(() => setLoading(false));
+  }, [refresh]);
+
+  async function learn(kanji) {
+    setSaving(kanji);
+    setError("");
+    try {
+      await request("/known-kanji", { method: "PUT", body: JSON.stringify({ add: [kanji], remove: [] }) });
+      await onLearned(kanji);
+      await refresh();
+    } catch (reason) {
+      setError(reason.message);
+    } finally {
+      setSaving("");
+    }
+  }
+
+  return <main className="dashboard-layout">
+    <section className="intro"><p className="eyebrow">YOUR READING PROGRESS</p><h1>Small steps, <span>steady growth.</span></h1><p className="intro-copy">A local snapshot of the words and kanji you have met so far.</p></section>
+    {error && <ErrorMessage message={error} />}
+    {loading ? <section className="dashboard-card"><p className="lookup-status">Loading your progress…</p></section> : <>
+      <section className="dashboard-metrics" aria-label="Study statistics">
+        {[{ label: "Known kanji", value: stats?.known_kanji_count ?? 0 }, { label: "Words met", value: stats?.words_met ?? 0 }, { label: "Saved cards", value: stats?.cards_total ?? 0 }, { label: "Due now", value: stats?.cards_due ?? 0 }, { label: "Kanji shown in latest render", value: stats?.latest_kanji_shown_percent == null ? "—" : `${stats.latest_kanji_shown_percent}%` }].map((item) => <article className="dashboard-metric" key={item.label}><span>{item.label}</span><strong>{item.value}</strong></article>)}
+      </section>
+      <section className="dashboard-card">
+        <div className="manager-heading"><div><p className="eyebrow">BASED ON YOUR SAVED CARDS</p><h2>Learn next</h2></div><button className="secondary-button" onClick={() => { setLoading(true); refresh().catch((reason) => setError(reason.message)).finally(() => setLoading(false)); }}>Refresh</button></div>
+        {suggestions.length === 0 ? <div className="manager-empty"><span className="empty-symbol">漢</span><p>No suggestions yet.</p><span>Save vocabulary cards with sentences to discover kanji that appear often.</span></div> : <div className="suggestion-list">{suggestions.map((item) => <article className="suggestion-row" key={item.kanji}><strong className="suggestion-kanji" lang="ja">{item.kanji}</strong><div className="suggestion-detail"><span>{item.frequency} appearances</span><p lang="ja">{item.example_words?.join(" · ") || "Saved card sentence"}</p></div><button className="render-button suggestion-action" onClick={() => learn(item.kanji)} disabled={saving === item.kanji || knownKanji.includes(item.kanji)}>{saving === item.kanji ? "Saving…" : "I learned this"}</button></article>)}</div>}
+      </section>
+    </>}
+    <footer className="page-footer"><span>Progress stays on this device.</span><span className="footer-dot">·</span><span>Suggestions come from saved cards.</span></footer>
+  </main>;
+}
+
+function ReviewPage() {
+  const [queue, setQueue] = useState([]);
+  const [sessionTotal, setSessionTotal] = useState(0);
+  const [knownKanji, setKnownKanji] = useState([]);
+  const [sentenceTokens, setSentenceTokens] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [sentenceLoading, setSentenceLoading] = useState(false);
+  const [answering, setAnswering] = useState(false);
+  const [flipped, setFlipped] = useState(false);
+  const [error, setError] = useState("");
+
+  const currentCard = queue[0] || null;
+  const answeredCount = sessionTotal - queue.length;
+
+  const loadDueCards = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    setFlipped(false);
+    try {
+      const [dueResult, kanjiResult] = await Promise.all([
+        request("/reviews/due?limit=100"),
+        request("/known-kanji"),
+      ]);
+      const dueCards = dueResult.cards || [];
+      setQueue(dueCards);
+      setSessionTotal(dueCards.length);
+      setKnownKanji(kanjiResult.known_kanji || []);
+    } catch (reason) {
+      setError(reason.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDueCards();
+  }, [loadDueCards]);
+
+  useEffect(() => {
+    let active = true;
+    if (!currentCard) {
+      setSentenceTokens([]);
+      return () => { active = false; };
+    }
+    setSentenceLoading(true);
+    request("/render", {
+      method: "POST",
+      body: JSON.stringify({ text: currentCard.sentence, known_kanji: knownKanji }),
+    }).then((result) => {
+      if (active) setSentenceTokens(result.tokens || []);
+    }).catch((reason) => {
+      if (active) {
+        setSentenceTokens([]);
+        setError(reason.message);
+      }
+    }).finally(() => {
+      if (active) setSentenceLoading(false);
+    });
+    return () => { active = false; };
+  }, [currentCard?.card_id, currentCard?.sentence, knownKanji]);
+
+  async function submitRating(rating) {
+    if (!currentCard || answering || !flipped) return;
+    setAnswering(true);
+    setError("");
+    try {
+      await request("/reviews/answer", {
+        method: "POST",
+        body: JSON.stringify({ card_id: currentCard.card_id, rating }),
+      });
+      setQueue((cards) => cards.slice(1));
+      setFlipped(false);
+    } catch (reason) {
+      setError(reason.message);
+    } finally {
+      setAnswering(false);
+    }
+  }
+
+  useEffect(() => {
+    function onKeyDown(event) {
+      const target = event.target;
+      if (event.altKey || event.ctrlKey || event.metaKey
+          || target?.isContentEditable
+          || ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName)) return;
+
+      if (event.code === "Space" && currentCard && !answering) {
+        event.preventDefault();
+        setFlipped((value) => !value);
+      } else if (flipped && /^[1-4]$/.test(event.key)) {
+        event.preventDefault();
+        submitRating(Number(event.key));
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [currentCard?.card_id, flipped, answering]);
+
+  function renderSentence() {
+    if (!sentenceTokens.length) return currentCard?.sentence;
+    return sentenceTokens.map((token, index) => {
+      const isTarget = token.lemma === currentCard.word || token.surface === currentCard.word;
+      return isTarget
+        ? <mark className="review-target" key={`${index}-${token.surface}`}>{token.display}</mark>
+        : <span key={`${index}-${token.surface}`}>{token.display}</span>;
+    });
+  }
+
+  return <main className="review-layout">
+    <section className="intro"><p className="eyebrow">SPACED REPETITION</p><h1>Review your <span>words.</span></h1><p className="intro-copy">Recall the word first, then reveal its reading and meaning. Your next review time is scheduled automatically.</p></section>
+    {loading ? <section className="review-card review-status" role="status"><span className="spinner tutor-spinner" />Loading due cards…</section> : error && !currentCard ? <section className="review-card"><ErrorMessage message={error} /><button className="render-button" onClick={loadDueCards}>Retry</button></section> : !currentCard ? (
+      <section className="review-card review-complete">
+        <span className="empty-symbol">復</span>
+        <p className="eyebrow">SESSION COMPLETE</p>
+        <h2>All done for today.</h2>
+        <p>{sessionTotal ? `You reviewed ${sessionTotal} ${sessionTotal === 1 ? "word" : "words"}.` : "There are no cards due right now."}</p>
+        <button className="secondary-button" onClick={loadDueCards} disabled={loading}>Check for due cards</button>
+      </section>
+    ) : <>
+      <section className="review-progress" aria-label="Review progress">
+        <div><span>{flipped ? "Answer" : `Card ${answeredCount + 1} of ${sessionTotal}`}</span><span>{answeredCount} completed</span></div>
+        <div className="review-progress-track"><span style={{ width: `${sessionTotal ? (answeredCount / sessionTotal) * 100 : 0}%` }} /></div>
+      </section>
+      <section className="review-card">
+        <button className={`review-face${flipped ? " is-back" : ""}`} onClick={() => !answering && setFlipped((value) => !value)} aria-label={flipped ? "Show sentence" : "Reveal answer"}>
+          {!flipped ? <>
+            {currentCard.image_path ? <img className="review-image" src={`${API_URL}${currentCard.image_path}`} alt={`Manga panel for ${currentCard.word}`} /> : <div className="review-no-image">言葉を思い出してみましょう</div>}
+            <div className="review-prompt"><p className="eyebrow">READ THE SENTENCE</p><p className="review-sentence" lang="ja">{renderSentence()}</p></div>
+            <span className="review-flip-hint">Click or press Space to reveal</span>
+          </> : <div className="review-answer">
+            <p className="eyebrow">WORD</p>
+            <h2 lang="ja">{currentCard.word}</h2>
+            <p className="review-reading" lang="ja">{currentCard.reading}</p>
+            <p className="review-meaning">{currentCard.meaning || "Meaning not saved"}</p>
+            <p className="review-source-sentence" lang="ja">{currentCard.sentence}</p>
+            <span className="review-flip-hint">Click or press Space to return</span>
+          </div>}
+        </button>
+        {sentenceLoading && !flipped && <p className="review-render-status">Preparing the masked sentence…</p>}
+        {error && <ErrorMessage message={error} />}
+        {flipped && <div className="review-rating-area">
+          <p>How well did you remember it?</p>
+          <div className="review-rating-buttons">
+            {[{ rating: 1, label: "Again" }, { rating: 2, label: "Hard" }, { rating: 3, label: "Good" }, { rating: 4, label: "Easy" }].map(({ rating, label }) => <button key={rating} className={`review-rating rating-${rating}`} onClick={() => submitRating(rating)} disabled={answering}>{label}<kbd>{rating}</kbd></button>)}
+          </div>
+          {answering && <p className="review-render-status" role="status">Saving your review…</p>}
+        </div>}
+      </section>
+    </>}
+    <footer className="page-footer"><span>Review scheduling runs locally.</span><span className="footer-dot">·</span><span>Again · Hard · Good · Easy</span></footer>
+  </main>;
 }
 
 function ListenPage({ knownKanji, lexicalPos, onWordClick }) {

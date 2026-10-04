@@ -34,6 +34,7 @@ from llm import (
     generate_practice as generate_practice_with_llm,
 )
 from ocr import OcrModelLoadError, recognize
+from progress import get_dashboard_stats, render_and_log, suggest_kanji
 from review import answer_card as answer_review_card, list_due_cards
 from tokenizer import mask_text
 
@@ -207,7 +208,17 @@ def health():
 
 @app.post("/render")
 def render(request: RenderRequest):
-    return {"tokens": mask_text(request.text, set(request.known_kanji))}
+    return render_and_log(request.text, request.known_kanji)
+
+
+@app.get("/suggestions/kanji")
+def kanji_suggestions():
+    return suggest_kanji(get_known_kanji())
+
+
+@app.get("/stats")
+def stats():
+    return get_dashboard_stats()
 
 
 @app.post("/explain")

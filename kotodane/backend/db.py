@@ -71,6 +71,14 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (word_id) REFERENCES words(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS render_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rendered_at TEXT NOT NULL,
+                kanji_total INTEGER NOT NULL,
+                kanji_shown INTEGER NOT NULL,
+                kanji_shown_percent REAL NOT NULL
+            );
             """
         )
         card_columns = {
@@ -78,6 +86,48 @@ def init_db() -> None:
         }
         if "notes" not in card_columns:
             connection.execute("ALTER TABLE cards ADD COLUMN notes TEXT NOT NULL DEFAULT ''")
+
+
+def record_render(*, kanji_total: int, kanji_shown: int, kanji_shown_percent: float) -> None:
+    with _connection() as connection:
+        connection.execute(
+            """INSERT INTO render_log
+               (rendered_at, kanji_total, kanji_shown, kanji_shown_percent)
+               VALUES (?, ?, ?, ?)""",
+            (_utc_now(), kanji_total, kanji_shown, kanji_shown_percent),
+        )
+
+
+def get_latest_render() -> dict[str, Any] | None:
+    with _connection() as connection:
+        row = connection.execute(
+            """SELECT rendered_at, kanji_total, kanji_shown, kanji_shown_percent
+               FROM render_log ORDER BY id DESC LIMIT 1"""
+        ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def get_dashboard_counts(now: str) -> dict[str, int]:
+    with _connection() as connection:
+        row = connection.execute(
+            """SELECT
+                   (SELECT COUNT(*) FROM known_kanji) AS known_kanji_count,
+                   (SELECT COUNT(*) FROM words) AS words_met,
+                   (SELECT COUNT(*) FROM cards) AS cards_total,
+                   (SELECT COUNT(*) FROM cards WHERE due_at IS NULL OR due_at <= ?) AS cards_due""",
+            (now,),
+        ).fetchone()
+    return dict(row)
+
+
+def get_saved_card_texts() -> list[dict[str, str]]:
+    with _connection() as connection:
+        rows = connection.execute(
+            """SELECT words.lemma AS word, cards.sentence
+               FROM cards JOIN words ON words.id = cards.word_id
+               ORDER BY cards.created_at, cards.id"""
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def get_known_kanji() -> list[str]:
