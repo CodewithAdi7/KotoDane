@@ -1,8 +1,11 @@
 from contextlib import asynccontextmanager
+from io import BytesIO
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from PIL import Image, UnidentifiedImageError
+from starlette.concurrency import run_in_threadpool
 
 from db import (
     create_or_tap_card,
@@ -13,6 +16,7 @@ from db import (
     update_known_kanji,
 )
 from dictionary import get_jamdict, lookup_word
+from ocr import OcrModelLoadError, recognize
 from tokenizer import mask_text
 
 
@@ -24,6 +28,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+MAX_OCR_UPLOAD_BYTES = 5 * 1024 * 1024
+SUPPORTED_IMAGE_TYPES = {
+    "image/jpeg": "JPEG",
+    "image/png": "PNG",
+    "image/webp": "WEBP",
+}
 
 
 class RenderRequest(BaseModel):
@@ -61,6 +72,61 @@ def health():
 @app.post("/render")
 def render(request: RenderRequest):
     return {"tokens": mask_text(request.text, set(request.known_kanji))}
+
+
+@app.post("/ocr")
+async def ocr(file: UploadFile = File(...)):
+    content_type = (file.content_type or "").split(";", maxsplit=1)[0].lower()
+    expected_format = SUPPORTED_IMAGE_TYPES.get(content_type)
+    if expected_format is None:
+        await file.close()
+        raise HTTPException(
+            status_code=415,
+            detail="Upload a JPEG, PNG, or WebP image.",
+        )
+
+    try:
+        image_bytes = await file.read(MAX_OCR_UPLOAD_BYTES + 1)
+    finally:
+        await file.close()
+    if len(image_bytes) > MAX_OCR_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Image uploads are limited to 5 MB.")
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="The uploaded image is empty.")
+
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            image_format = image.format
+            image.verify()
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="The upload is not a valid, readable image.",
+        ) from exc
+
+    if image_format != expected_format:
+        raise HTTPException(
+            status_code=415,
+            detail="The image contents do not match the declared file type.",
+        )
+
+    try:
+        text = await run_in_threadpool(recognize, image_bytes)
+    except OcrModelLoadError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "The OCR model could not be loaded. Confirm manga-ocr is installed; "
+                "its model downloads on the first OCR request."
+            ),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="OCR could not process this image.",
+        ) from exc
+
+    return {"text": text}
 
 
 @app.get("/lookup")

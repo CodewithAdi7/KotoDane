@@ -4,3 +4,5 @@ fugashi
 unidic-lite
 jamdict
 jamdict-data
+manga-ocr
+python-multipart
