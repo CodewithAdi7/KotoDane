@@ -2,7 +2,7 @@
 
 ## Summary
 
-Local-first Japanese reading tutor for a beginner learner. Phase 0 established the project structure; Phase 1 added Japanese tokenization and kanji-aware rendering; Phase 2 added local dictionary lookup; Phase 3 added persistent known-kanji and vocabulary-card endpoints; Phase 4 added the reader UI; Phase 5 added word lookup and known-kanji management; Phase 6 connects word lookup to saved vocabulary cards; Phase 7 adds local manga OCR; Phase 8 connects page cropping, OCR, reading, and card thumbnails.
+Local-first Japanese reading tutor for a beginner learner. Phase 0 established the project structure; Phase 1 added Japanese tokenization and kanji-aware rendering; Phase 2 added local dictionary lookup; Phase 3 added persistent known-kanji and vocabulary-card endpoints; Phase 4 added the reader UI; Phase 5 added word lookup and known-kanji management; Phase 6 connects word lookup to saved vocabulary cards; Phase 7 adds local manga OCR; Phase 8 connects page cropping, OCR, reading, and card thumbnails; Phases L1-L3 add local Ollama explanations, level guardrails, practice examples, and casual-speech explanations.
 
 ## Stack
 
@@ -27,9 +27,11 @@ kotodane/
 │   ├── llm.py
 │   ├── main.py
 │   ├── ocr.py  (lazy manga-ocr model)
+│   ├── prompts.py  (LLM prompt templates and JSON schemas)
 │   ├── requirements.txt
 │   ├── test_dictionary.py
 │   ├── test_guardrail.py
+│   ├── test_l3.py
 │   ├── test_ocr.py
 │   ├── test_tokenizer.py
 │   ├── tokenizer.py
@@ -109,6 +111,8 @@ uvicorn main:app --reload
 
 Phase L2 checks generated Japanese explanation text with fugashi. Kana-only words, particles, punctuation, and whitespace are allowed; unlisted kanji trigger a retry, and unknown vocabulary above the 10% default threshold also triggers a retry. `/explain` returns `tries`, `unknown_ratio`, and `passed` alongside the explanation. Retry feedback names the words or kanji to avoid. Run the mocked guardrail tests from `backend` with `python -m pytest -q test_guardrail.py`.
 
+Phase L3 adds `POST /practice` for short target-word example sentences and `POST /explain-casual` for spoken Japanese forms and sentence endings. Both use structured Ollama JSON and the L2 guardrail loop; responses include `tries`, `unknown_ratio`, and `passed`. Practice accepts `count` from 1 to 10 (default 3). Test the mocked L3 validation and guardrail paths with `python -m pytest -q test_l3.py` from `backend`.
+
 Phase L1 model recommendation: use `qwen3:4b` (Q4_K_M, approximately 2.5 GB; Apache License 2.0). The 4B size and quantization suit a 6 GB GPU, though available VRAM and context usage determine GPU offload. Alternatives: `gemma3:4b` (approximately 3.3 GB; Gemma Terms of Use) supports over 140 languages; `llama3.2:3b` (approximately 2.0 GB; Llama 3.2 Community License) is lightweight, but Japanese is not among Meta's officially listed supported languages. Ollama catalog sizes and licenses: [Qwen3 4B](https://ollama.com/library/qwen3%3A4b), [Gemma 3 4B](https://ollama.com/library/gemma3%3A4b), [Llama 3.2 3B](https://ollama.com/library/llama3.2%3A3b).
 
 Run the OCR sample check from `backend` after choosing a local sample image: `python test_ocr.py "C:\\path\\to\\speech-bubble.png" --expected "ここに予想される日本語"`. Omit `--expected` to print the recognition result without comparing it.
@@ -134,6 +138,7 @@ Run the reader UI in a second PowerShell terminal with `cd frontend`, `npm insta
 - Phase 8 uses React Image Crop in the Panel tab, saves the selected crop through `POST /images`, renders corrected OCR text through the existing `/render` flow, and attaches the saved crop path to vocabulary cards.
 - Phase L1 adds a local Ollama `/explain` endpoint with `qwen3:4b` as the default model, JSON-validated output, beginner-level Japanese constrained by the supplied known lists, and a short English hint. Qwen3 thinking is disabled for this short structured response so its output budget is used for the JSON result. Model license: Apache License 2.0.
 - Phase L2 validates `explanation_ja` against known kanji and words, retries up to three times with `avoid:` feedback, and returns the best attempt with retry metadata. Unknown kanji always cause a retry; unknown vocabulary is tolerated only within the configured ratio.
+- Phase L3 adds `/practice` and `/explain-casual`, using structured JSON prompts and the L2 guardrail. Practice checks all returned example sentences; casual-speech explanations allow quoted forms from the input sentence while still checking kanji against the learner's known list.
 - Reopening an existing vocabulary card with a crop updates its image path instead of creating a duplicate card.
 - CORS permits the Vite development origin `http://localhost:5173`.
 
@@ -150,4 +155,5 @@ Run the reader UI in a second PowerShell terminal with `cd frontend`, `npm insta
 - [ ] Phase 8: panel crop, OCR, and image-backed cards (manual OCR round-trip pending)
 - [x] Phase L1: local Ollama `/explain`
 - [x] Phase L2: level-locked guardrail loop
+- [x] Phase L3: practice sentences and casual-speech explanations
 - [ ] Later phases: application features

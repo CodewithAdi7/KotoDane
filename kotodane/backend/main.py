@@ -24,7 +24,9 @@ from llm import (
     OllamaResponseError,
     OllamaTimeoutError,
     OllamaUnavailableError,
+    explain_casual as explain_casual_with_llm,
     explain as explain_with_llm,
+    generate_practice as generate_practice_with_llm,
 )
 from ocr import OcrModelLoadError, recognize
 from tokenizer import mask_text
@@ -76,6 +78,19 @@ class ExplainRequest(BaseModel):
     known_words: list[str]
 
 
+class PracticeRequest(BaseModel):
+    word: str = Field(min_length=1)
+    known_kanji: list[str]
+    known_words: list[str]
+    count: int = Field(default=3, ge=1, le=10)
+
+
+class CasualExplainRequest(BaseModel):
+    sentence: str = Field(min_length=1)
+    known_kanji: list[str]
+    known_words: list[str]
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
@@ -112,6 +127,62 @@ def post_explain(request: ExplainRequest):
             known_kanji=request.known_kanji,
             # The selected target is what the learner is asking to understand.
             known_words=[*request.known_words, request.word],
+        )
+    except OllamaUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except OllamaTimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except OllamaResponseError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/practice")
+def post_practice(request: PracticeRequest):
+    try:
+        def task_fn(feedback: str):
+            return generate_practice_with_llm(
+                word=request.word,
+                known_kanji=request.known_kanji,
+                known_words=request.known_words,
+                count=request.count,
+                feedback=feedback or None,
+            )
+
+        return generate_within_level(
+            task_fn=task_fn,
+            known_kanji=request.known_kanji,
+            known_words=[*request.known_words, request.word],
+        )
+    except OllamaUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except OllamaTimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except OllamaResponseError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/explain-casual")
+def post_explain_casual(request: CasualExplainRequest):
+    try:
+        sentence_words = [
+            form
+            for token in mask_text(request.sentence, set(request.known_kanji))
+            for form in (token["surface"], token["lemma"])
+        ]
+
+        def task_fn(feedback: str):
+            return explain_casual_with_llm(
+                sentence=request.sentence,
+                known_kanji=request.known_kanji,
+                known_words=request.known_words,
+                feedback=feedback or None,
+            )
+
+        return generate_within_level(
+            task_fn=task_fn,
+            known_kanji=request.known_kanji,
+            # The casual form in the sentence is the expression being taught.
+            known_words=[*request.known_words, *sentence_words],
         )
     except OllamaUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

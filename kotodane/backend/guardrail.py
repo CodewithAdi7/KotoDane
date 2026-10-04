@@ -73,6 +73,21 @@ def check_level(
     }
 
 
+def _generated_japanese_text(value: Any, key: str = "") -> str:
+    """Extract Japanese fields from a generated result, excluding English hints."""
+    if isinstance(value, str):
+        return "" if key.lower().endswith("_en") else value
+    if isinstance(value, dict):
+        return "\n".join(
+            _generated_japanese_text(child, str(child_key))
+            for child_key, child in value.items()
+            if child_key not in {"tries", "unknown_ratio", "passed"}
+        )
+    if isinstance(value, (list, tuple)):
+        return "\n".join(_generated_japanese_text(child) for child in value)
+    return ""
+
+
 def generate_within_level(
     task_fn: Callable[[str], Any],
     known_kanji: set[str] | list[str],
@@ -83,8 +98,8 @@ def generate_within_level(
     """Generate, check, and retry with explicit feedback when output is too hard.
 
     ``task_fn`` receives an empty string on the first call, then an ``avoid:``
-    hint containing vocabulary or kanji from failed attempts. It may return
-    either a Japanese string or a mapping with an ``explanation_ja`` field.
+    hint containing vocabulary or kanji from failed attempts. It may return a
+    Japanese string or a mapping whose Japanese string fields will be checked.
     """
     attempts = max(1, max_tries)
     feedback = ""
@@ -94,7 +109,7 @@ def generate_within_level(
 
     for attempt in range(1, attempts + 1):
         result = task_fn(feedback)
-        text = result.get("explanation_ja", "") if isinstance(result, dict) else str(result)
+        text = _generated_japanese_text(result)
         level = check_level(text, known_kanji, known_words)
         passed = (
             not level["unknown_kanji"]
@@ -126,7 +141,10 @@ def generate_within_level(
 
         offending = sorted(set(level["unknown_kanji"] + level["unknown_words"]))
         avoid = "、".join(offending) if offending else "unknown vocabulary"
-        feedback = f"avoid: {avoid}. Use kana or known vocabulary instead."
+        feedback = (
+            f"avoid: {avoid}. Do not write these items or substitute new vocabulary. "
+            "Rewrite them in hiragana, and use only the supplied known kanji and words."
+        )
 
     assert best_check is not None
     response = dict(best_result) if isinstance(best_result, dict) else {"text": best_result}
