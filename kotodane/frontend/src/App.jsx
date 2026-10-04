@@ -20,7 +20,16 @@ async function request(path, options = {}) {
     throw new Error("Could not reach the backend. Start the FastAPI server and try again.");
   }
   if (!response.ok) {
-    const detail = await response.text();
+    const raw = await response.text();
+    let detail = raw;
+    try {
+      detail = JSON.parse(raw).detail || raw;
+    } catch {
+      // Keep a plain-text backend error as-is.
+    }
+    if (response.status === 503 && String(detail).startsWith("Cannot connect to Ollama")) {
+      detail = "Ollama is not running. Open Ollama, then choose Retry.";
+    }
     throw new Error(detail || `The backend returned ${response.status}.`);
   }
   return response.json();
@@ -41,6 +50,16 @@ function sentenceForToken(tokens, tokenIndex, text) {
   return text.slice(sentenceStart, sentenceEnd).trim();
 }
 
+function TokenRun({ tokens, onTokenClick, lexicalPos }) {
+  return tokens.map((token, index) => lexicalPos(token.pos) ? (
+    <button key={`${index}-${token.surface}`} className={`word-token word-button${token.masked ? " is-masked" : ""}`} onClick={() => onTokenClick(token, index, tokens)} title={`Look up ${token.surface}`} aria-label={`Look up ${token.surface}`}>
+      {token.display}
+    </button>
+  ) : (
+    <span key={`${index}-${token.surface}`} className={`word-token${token.masked ? " is-masked" : ""}`}>{token.display}</span>
+  ));
+}
+
 function App() {
   const [page, setPage] = useState("reader");
   const [text, setText] = useState("");
@@ -52,6 +71,7 @@ function App() {
   const [error, setError] = useState("");
   const [managerError, setManagerError] = useState("");
   const [selected, setSelected] = useState(null);
+  const [selectedSentence, setSelectedSentence] = useState("");
   const [lookup, setLookup] = useState(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState("");
@@ -156,10 +176,11 @@ function App() {
     }
   }
 
-  async function openLookup(token, tokenIndex) {
+  async function openLookup(token, tokenIndex, sourceTokens = tokens, sourceText = text) {
     const word = token.lemma || token.surface;
-    const sentence = sentenceForToken(tokens, tokenIndex, text) || token.surface;
+    const sentence = sentenceForToken(sourceTokens, tokenIndex, sourceText) || token.surface;
     setSelected(token);
+    setSelectedSentence(sentence);
     setLookup(null);
     setLookupError("");
     setSaveState({ status: "saving" });
@@ -178,7 +199,7 @@ function App() {
             reading: token.reading_hiragana || word,
             meaning,
             sentence,
-            image_path: activeImagePath,
+            image_path: page === "reader" ? activeImagePath : null,
           }),
         });
         setSaveState({ status: "saved", created: result.created, card: result.card });
@@ -192,6 +213,14 @@ function App() {
     } finally {
       setLookupLoading(false);
     }
+  }
+
+  async function savePracticeExample(lemma, note) {
+    const result = await request(`/cards/${encodeURIComponent(lemma)}/notes`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    });
+    setCards((current) => [result.card, ...current.filter((card) => card.lemma !== result.card.lemma)]);
   }
 
   async function saveKanjiChange(add, remove) {
@@ -253,6 +282,7 @@ function App() {
         <nav className="tabs" aria-label="Main navigation">
           <button className={page === "reader" ? "tab is-active" : "tab"} onClick={() => setPage("reader")}>Reader</button>
           <button className={page === "panel" ? "tab is-active" : "tab"} onClick={() => setPage("panel")}>Panel</button>
+          <button className={page === "listen" ? "tab is-active" : "tab"} onClick={() => setPage("listen")}>Listen</button>
           <button className={page === "kanji" ? "tab is-active" : "tab"} onClick={() => setPage("kanji")}>Kanji</button>
           <button className={page === "cards" ? "tab is-active" : "tab"} onClick={() => setPage("cards")}>Cards</button>
         </nav>
@@ -275,9 +305,9 @@ function App() {
           {error && <ErrorMessage message={error} />}
           <section className="output-card">
             <div className="output-heading"><div><p className="eyebrow">YOUR READING VIEW</p><h2>Tap a word to explore it</h2></div>{tokens.length > 0 && <span className="result-count">{tokens.length} tokens</span>}</div>
-            {tokens.length === 0 ? <div className="empty-state"><span className="empty-symbol">読</span><p>Your reading will appear here</p><span>Kanji outside your known list will show their hiragana reading.</span></div> : <div className="rendered-text" lang="ja">{tokens.map((token, index) => lexicalPos(token.pos) ? <button key={`${index}-${token.surface}`} className={`word-token word-button${token.masked ? " is-masked" : ""}`} onClick={() => openLookup(token, index)} title={`Look up ${token.surface}`} aria-label={`Look up ${token.surface}`}>{token.display}</button> : <span key={`${index}-${token.surface}`} className={`word-token${token.masked ? " is-masked" : ""}`}>{token.display}</span>)}</div>}
+            {tokens.length === 0 ? <div className="empty-state"><span className="empty-symbol">読</span><p>Your reading will appear here</p><span>Kanji outside your known list will show their hiragana reading.</span></div> : <div className="rendered-text" lang="ja"><TokenRun tokens={tokens} lexicalPos={lexicalPos} onTokenClick={(token, index) => openLookup(token, index)} /></div>}
           </section>
-          {selected && <LookupPanel token={selected} data={lookup} loading={lookupLoading} error={lookupError} saveState={saveState} showOriginal={showOriginal} onShowOriginal={setShowOriginal} onClose={() => { setSelected(null); setLookup(null); setSaveState(null); }} />}
+          {selected && <LookupPanel token={selected} sentence={selectedSentence} data={lookup} loading={lookupLoading} error={lookupError} saveState={saveState} showOriginal={showOriginal} onShowOriginal={setShowOriginal} onClose={() => { setSelected(null); setLookup(null); setSaveState(null); }} knownKanji={knownKanji} savedWords={cards.map((card) => card.lemma)} lexicalPos={lexicalPos} onWordClick={(token, index, sourceTokens) => openLookup(token, index, sourceTokens, sourceTokens.map((part) => part.surface).join(""))} onSaveExample={savePracticeExample} />}
           <footer className="page-footer"><span>Built for slow, curious reading.</span><span className="footer-dot">·</span><span>One word at a time</span></footer>
         </main>
       ) : page === "kanji" ? (
@@ -297,15 +327,76 @@ function App() {
           <section className="cards-card">
             <div className="manager-heading"><div><p className="eyebrow">VOCABULARY CARDS</p><h2>{cards.length} saved {cards.length === 1 ? "word" : "words"}</h2></div><button className="secondary-button" onClick={loadCards} disabled={cardsLoading}>Refresh</button></div>
             {cardsError && <ErrorMessage message={cardsError} />}
-            {cardsLoading && cards.length === 0 ? <p className="lookup-status">Loading saved cards…</p> : cards.length === 0 ? <div className="manager-empty"><span className="empty-symbol">語</span><p>No saved words yet.</p><span>Tap a word in Reader to save it here.</span></div> : <div className="saved-card-list">{cards.map((card) => <article className="saved-card" key={card.id}>{card.image_path && <img className="card-thumbnail" src={`${API_URL}${card.image_path}`} alt={`Cropped manga panel for ${card.lemma}`} loading="lazy" />}<div className="saved-card-heading"><div><h3 lang="ja">{card.lemma}</h3><span lang="ja">{card.reading}</span></div><span className="tap-count">Tapped {card.tap_count} {card.tap_count === 1 ? "time" : "times"}</span></div><p className="saved-meaning">{card.meaning || "Meaning not found in the local dictionary."}</p><p className="saved-sentence" lang="ja">{card.sentence}</p></article>)}</div>}
+            {cardsLoading && cards.length === 0 ? <p className="lookup-status">Loading saved cards…</p> : cards.length === 0 ? <div className="manager-empty"><span className="empty-symbol">語</span><p>No saved words yet.</p><span>Tap a word in Reader to save it here.</span></div> : <div className="saved-card-list">{cards.map((card) => <article className="saved-card" key={card.id}>{card.image_path && <img className="card-thumbnail" src={`${API_URL}${card.image_path}`} alt={`Cropped manga panel for ${card.lemma}`} loading="lazy" />}<div className="saved-card-heading"><div><h3 lang="ja">{card.lemma}</h3><span lang="ja">{card.reading}</span></div><span className="tap-count">Tapped {card.tap_count} {card.tap_count === 1 ? "time" : "times"}</span></div><p className="saved-meaning">{card.meaning || "Meaning not found in the local dictionary."}</p><p className="saved-sentence" lang="ja">{card.sentence}</p>{card.notes && <div className="card-examples"><p className="eyebrow">PRACTICE EXAMPLES</p>{card.notes.split("\n").map((note, index) => <p className="saved-example" lang="ja" key={`${index}-${note}`}>{note}</p>)}</div>}</article>)}</div>}
           </section>
           <footer className="page-footer"><span>Saved on this device.</span><span className="footer-dot">·</span><button className="text-button" onClick={() => setPage("reader")}>Back to reader</button></footer>
         </main>
+      ) : page === "listen" ? (
+        <>
+          <ListenPage
+            knownKanji={knownKanji}
+            lexicalPos={lexicalPos}
+            onWordClick={(token, index, sourceTokens) => openLookup(
+              token,
+              index,
+              sourceTokens,
+              sourceTokens.map((part) => part.surface).join(""),
+            )}
+          />
+          {selected && <div className="listen-lookup"><LookupPanel token={selected} sentence={selectedSentence} data={lookup} loading={lookupLoading} error={lookupError} saveState={saveState} showOriginal={showOriginal} onShowOriginal={setShowOriginal} onClose={() => { setSelected(null); setLookup(null); setSaveState(null); }} knownKanji={knownKanji} savedWords={cards.map((card) => card.lemma)} lexicalPos={lexicalPos} onWordClick={(token, index, sourceTokens) => openLookup(token, index, sourceTokens, sourceTokens.map((part) => part.surface).join(""))} onSaveExample={savePracticeExample} /></div>}
+        </>
       ) : (
         <PanelPage onProcessText={processPanelText} />
       )}
     </div>
   );
+}
+
+function ListenPage({ knownKanji, lexicalPos, onWordClick }) {
+  const [file, setFile] = useState(null);
+  const [segments, setSegments] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event) {
+    event.preventDefault();
+    if (!file) {
+      setError("Choose an audio or video clip first.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setSegments([]);
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const result = await request("/transcribe", { method: "POST", body: form });
+      setSegments(result.segments || []);
+    } catch (reason) {
+      setError(reason.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <main className="listen-layout">
+    <section className="intro"><p className="eyebrow">JAPANESE LISTENING PRACTICE</p><h1>Listen. <span>Then read.</span></h1><p className="intro-copy">Upload a short clip to get a Japanese transcript, kanji readings, and a word familiarity estimate.</p></section>
+    <section className="listen-card">
+      <form onSubmit={submit}>
+        <div className="manager-heading"><div><p className="eyebrow">AUDIO INPUT</p><h2>Choose a clip</h2></div><label className="secondary-button upload-control">{file ? "Choose another clip" : "Upload audio or video"}<input type="file" accept="audio/*,video/*,.m4a,.mkv,.mov,.mp4,.webm" onChange={(event) => { setFile(event.target.files?.[0] || null); setSegments([]); setError(""); }} /></label></div>
+        <div className="listen-upload-details">{file ? <span>{file.name} · {(file.size / (1024 * 1024)).toFixed(1)} MB</span> : <span>Audio or video, up to 60 seconds and 50 MB</span>}<span>{knownKanji.length} kanji known · saved cards count as known words</span></div>
+        <div className="panel-process-row"><p className="panel-note">Processing stays on this computer. First use downloads the Whisper model.</p><button className="render-button" type="submit" disabled={!file || busy}>{busy ? <><span className="spinner" />Transcribing</> : "Transcribe clip"}</button></div>
+      </form>
+      {busy && <p className="tutor-loading" role="status"><span className="spinner tutor-spinner" />Transcribing locally. The first run may take longer while the model downloads.</p>}
+      {error && <ErrorMessage message={error} />}
+      {segments.length > 0 ? <div className="transcript-list">{segments.map((segment, index) => <article className="transcript-segment" key={`${segment.start}-${index}`}>
+        <div className="transcript-heading"><p className="eyebrow">SEGMENT {index + 1} · {Number(segment.start).toFixed(1)}–{Number(segment.end).toFixed(1)}s</p><span className="known-percent">{segment.known_words_percent}% words known</span></div>
+        <div className="rendered-text transcript-text" lang="ja"><TokenRun tokens={segment.tokens} lexicalPos={lexicalPos} onTokenClick={(token, tokenIndex, sourceTokens) => onWordClick(token, tokenIndex, sourceTokens)} /></div>
+        <p className="transcript-original" lang="ja">{segment.text}</p>
+      </article>)}</div> : !busy && !error && <div className="panel-empty"><span className="empty-symbol">聴</span><p>Your transcript will appear here.</p><span>Tap an underlined word to open its dictionary and tutor panel.</span></div>}
+    </section>
+    <footer className="page-footer"><span>Japanese model: Whisper small.</span><span className="footer-dot">·</span><span>Transcript remains local.</span></footer>
+  </main>;
 }
 
 function ErrorMessage({ message }) {
@@ -433,7 +524,7 @@ function PanelPage({ onProcessText }) {
   </main>;
 }
 
-function LookupPanel({ token, data, loading, error, saveState, showOriginal, onShowOriginal, onClose }) {
+function LookupPanel({ token, sentence, data, loading, error, saveState, showOriginal, onShowOriginal, onClose, knownKanji, savedWords, lexicalPos, onWordClick, onSaveExample }) {
   const word = token.masked && !showOriginal ? token.display : token.surface;
   return <aside className="lookup-panel" aria-label="Word lookup">
     <div className="lookup-topline"><div><p className="eyebrow">WORD LOOKUP</p><h2 lang="ja">{word}</h2></div><button className="close-button" onClick={onClose} aria-label="Close lookup">×</button></div>
@@ -451,7 +542,129 @@ function LookupPanel({ token, data, loading, error, saveState, showOriginal, onS
       {(entry.senses || []).map((sense, senseIndex) => <div className="sense" key={senseIndex}><p className="sense-pos">{sense.pos?.join(", ") || "Meaning"}</p><ul>{sense.glosses?.map((gloss, glossIndex) => <li key={glossIndex}>{gloss}</li>)}</ul></div>)}
     </article>)}
     {(data.kanji || []).length > 0 && <section className="kanji-breakdown"><p className="eyebrow">KANJI BREAKDOWN</p>{data.kanji.map((item) => <article className="kanji-detail" key={item.char}><strong lang="ja">{item.char}</strong><div><p>{item.meanings?.join(", ") || "Meaning unavailable"}</p><span>On: {item.onyomi?.join("、") || "—"} · Kun: {item.kunyomi?.join("、") || "—"}{item.strokes ? ` · ${item.strokes} strokes` : ""}</span></div></article>)}</section>}</div>}
+    <TutorPanel
+      token={token}
+      sentence={sentence}
+      knownKanji={knownKanji}
+      savedWords={savedWords}
+      lexicalPos={lexicalPos}
+      onWordClick={onWordClick}
+      onSaveExample={onSaveExample}
+    />
   </aside>;
+}
+
+function TutorPanel({ token, sentence, knownKanji, savedWords, lexicalPos, onWordClick, onSaveExample }) {
+  const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState("");
+  const [lastMode, setLastMode] = useState("");
+  const [result, setResult] = useState(null);
+  const [renderedText, setRenderedText] = useState([]);
+  const [practice, setPractice] = useState([]);
+  const [error, setError] = useState("");
+  const [savingSentence, setSavingSentence] = useState("");
+  const [practiceLemma, setPracticeLemma] = useState("");
+  const [savedExamples, setSavedExamples] = useState(() => new Set());
+  const [saveError, setSaveError] = useState("");
+  const targetWord = token.lemma || token.surface;
+
+  async function run(action) {
+    setMode(action);
+    setLastMode(action);
+    setBusy(true);
+    setError("");
+    setSaveError("");
+    setResult(null);
+    setRenderedText([]);
+    setPractice([]);
+    if (action === "practice") setPracticeLemma(targetWord);
+    try {
+      const latest = await request("/cards");
+      const words = [...new Set([
+        ...savedWords,
+        ...(latest.cards || []).map((card) => card.lemma),
+        targetWord,
+      ])];
+      let generated;
+      if (action === "explain") {
+        generated = await request("/explain", {
+          method: "POST",
+          body: JSON.stringify({ sentence, word: targetWord, known_kanji: knownKanji, known_words: words }),
+        });
+      } else if (action === "practice") {
+        generated = await request("/practice", {
+          method: "POST",
+          body: JSON.stringify({ word: targetWord, known_kanji: knownKanji, known_words: words, count: 3 }),
+        });
+      } else {
+        generated = await request("/explain-casual", {
+          method: "POST",
+          body: JSON.stringify({ sentence, known_kanji: knownKanji, known_words: words }),
+        });
+      }
+
+      setResult(generated);
+      if (action === "practice") {
+        const rendered = await Promise.all((generated.sentences || []).map(async (item) => {
+          const output = await request("/render", {
+            method: "POST",
+            body: JSON.stringify({ text: item.sentence, known_kanji: knownKanji }),
+          });
+          return { ...item, tokens: output.tokens || [] };
+        }));
+        setPractice(rendered);
+      } else if (generated.explanation_ja) {
+        const output = await request("/render", {
+          method: "POST",
+          body: JSON.stringify({ text: generated.explanation_ja, known_kanji: knownKanji }),
+        });
+        setRenderedText(output.tokens || []);
+      }
+    } catch (reason) {
+      setError(reason.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveExample(example) {
+    setSavingSentence(example);
+    setSaveError("");
+    try {
+      await onSaveExample(practiceLemma || targetWord, example);
+      setSavedExamples((current) => new Set([...current, example]));
+    } catch (reason) {
+      setSaveError(reason.message);
+    } finally {
+      setSavingSentence("");
+    }
+  }
+
+  return <section className="tutor-section" aria-label="AI tutor">
+    <div className="tutor-heading"><div><p className="eyebrow">LOCAL AI TUTOR</p><h3>Learn this word</h3></div></div>
+    <div className="tutor-actions">
+      <button className="secondary-button" onClick={() => run("explain")} disabled={busy}>AI explain</button>
+      <button className="secondary-button" onClick={() => run("practice")} disabled={busy}>Practice sentences</button>
+      <button className="secondary-button" onClick={() => run("casual")} disabled={busy}>Explain casual speech</button>
+    </div>
+    {busy && <p className="tutor-loading" role="status"><span className="spinner tutor-spinner" />The local tutor is thinking…</p>}
+    {error && <div className="tutor-error"><ErrorMessage message={error} /><button className="text-button" onClick={() => run(lastMode)}>Retry</button></div>}
+    {result && <>
+      <p className={`level-check${result.passed ? " is-passed" : " is-review"}`} role="status">
+        Level-checked · {result.tries} {result.tries === 1 ? "try" : "tries"} · {result.passed ? "Passed" : "Needs review"}
+      </p>
+      {mode === "practice" ? <div className="tutor-practice-list">{practice.map((item, index) => <article className="tutor-practice-item" key={`${index}-${item.sentence}`}>
+        <div className="tutor-japanese" lang="ja"><TokenRun tokens={item.tokens} lexicalPos={lexicalPos} onTokenClick={onWordClick} /></div>
+        <p className="tutor-hint">{item.hint_en}</p>
+        {savedExamples.has(item.sentence) ? <span className="example-saved">Saved to card</span> : <button className="text-button save-example-button" onClick={() => saveExample(item.sentence)} disabled={savingSentence === item.sentence}>{savingSentence === item.sentence ? "Saving…" : "Save as card example"}</button>}
+      </article>)}</div> : <div className="tutor-explanation">
+        <p className="tutor-japanese" lang="ja"><TokenRun tokens={renderedText} lexicalPos={lexicalPos} onTokenClick={onWordClick} /></p>
+        <p className="tutor-hint">{result.hint_en}</p>
+      </div>}
+      {result.passed === false && <button className="text-button" onClick={() => run(lastMode)} disabled={busy}>Try again</button>}
+    </>}
+    {saveError && <ErrorMessage message={saveError} />}
+  </section>;
 }
 
 export default App;

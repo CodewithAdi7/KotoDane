@@ -65,6 +65,7 @@ def init_db() -> None:
                 sentence TEXT NOT NULL,
                 meaning TEXT NOT NULL,
                 image_path TEXT NULL,
+                notes TEXT NOT NULL DEFAULT '',
                 fsrs_state TEXT NULL,
                 due_at TEXT NULL,
                 created_at TEXT NOT NULL,
@@ -72,6 +73,11 @@ def init_db() -> None:
             );
             """
         )
+        card_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(cards)").fetchall()
+        }
+        if "notes" not in card_columns:
+            connection.execute("ALTER TABLE cards ADD COLUMN notes TEXT NOT NULL DEFAULT ''")
 
 
 def get_known_kanji() -> list[str]:
@@ -125,7 +131,7 @@ _CARD_SELECT = """
     SELECT cards.id, cards.word_id, words.lemma, words.reading,
            words.seen_count, words.tap_count, words.first_seen,
            cards.sentence, cards.meaning, cards.image_path,
-           cards.fsrs_state, cards.due_at, cards.created_at
+           cards.notes, cards.fsrs_state, cards.due_at, cards.created_at
     FROM cards JOIN words ON words.id = cards.word_id
 """
 
@@ -136,6 +142,38 @@ def get_cards() -> list[dict[str, Any]]:
             _CARD_SELECT + " ORDER BY cards.created_at DESC, cards.id DESC"
         ).fetchall()
     return [_card_from_row(row) for row in rows]
+
+
+def get_due_cards(limit: int, now: str) -> list[dict[str, Any]]:
+    """Return scheduled cards due by ``now``; unscheduled new cards are due now."""
+    with _connection() as connection:
+        rows = connection.execute(
+            """SELECT cards.id AS card_id, words.lemma AS word, words.reading,
+                      cards.meaning, cards.sentence, cards.image_path, cards.due_at
+               FROM cards JOIN words ON words.id = cards.word_id
+               WHERE cards.due_at IS NULL OR cards.due_at <= ?
+               ORDER BY (cards.due_at IS NOT NULL), cards.due_at, cards.created_at
+               LIMIT ?""",
+            (now, limit),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_card_for_review(card_id: int) -> dict[str, Any] | None:
+    with _connection() as connection:
+        row = connection.execute(
+            _CARD_SELECT + " WHERE cards.id = ?", (card_id,)
+        ).fetchone()
+    return _card_from_row(row) if row is not None else None
+
+
+def save_review_state(*, card_id: int, fsrs_state: str, due_at: str) -> bool:
+    with _connection() as connection:
+        cursor = connection.execute(
+            "UPDATE cards SET fsrs_state = ?, due_at = ? WHERE id = ?",
+            (fsrs_state, due_at, card_id),
+        )
+    return cursor.rowcount == 1
 
 
 def create_or_tap_card(
@@ -188,3 +226,29 @@ def create_or_tap_card(
             ).fetchone()
 
     return {"card": _card_from_row(card), "created": created}
+
+
+def add_card_note(*, lemma: str, note: str) -> dict[str, Any] | None:
+    """Append a unique example note to an existing vocabulary card."""
+    cleaned_note = note.strip()
+    if not cleaned_note:
+        raise ValueError("A card note cannot be empty.")
+    with _connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        card_row = connection.execute(
+            _CARD_SELECT + " WHERE words.lemma = ?", (lemma,)
+        ).fetchone()
+        if card_row is None:
+            return None
+        existing = card_row["notes"] or ""
+        notes = existing.splitlines()
+        if cleaned_note not in notes:
+            notes.append(cleaned_note)
+            connection.execute(
+                "UPDATE cards SET notes = ? WHERE id = ?",
+                ("\n".join(notes), card_row["id"]),
+            )
+        updated = connection.execute(
+            _CARD_SELECT + " WHERE cards.id = ?", (card_row["id"],)
+        ).fetchone()
+    return _card_from_row(updated)

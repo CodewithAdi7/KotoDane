@@ -6,3 +6,5 @@ jamdict
 jamdict-data
 manga-ocr
 python-multipart
+faster-whisper
+fsrs

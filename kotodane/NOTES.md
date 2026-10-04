@@ -2,7 +2,7 @@
 
 ## Summary
 
-Local-first Japanese reading tutor for a beginner learner. Phase 0 established the project structure; Phase 1 added Japanese tokenization and kanji-aware rendering; Phase 2 added local dictionary lookup; Phase 3 added persistent known-kanji and vocabulary-card endpoints; Phase 4 added the reader UI; Phase 5 added word lookup and known-kanji management; Phase 6 connects word lookup to saved vocabulary cards; Phase 7 adds local manga OCR; Phase 8 connects page cropping, OCR, reading, and card thumbnails; Phases L1-L3 add local Ollama explanations, level guardrails, practice examples, and casual-speech explanations.
+Local-first Japanese reading tutor for a beginner learner. Phase 0 established the project structure; Phase 1 added Japanese tokenization and kanji-aware rendering; Phase 2 added local dictionary lookup; Phase 3 added persistent known-kanji and vocabulary-card endpoints; Phase 4 added the reader UI; Phase 5 added word lookup and known-kanji management; Phase 6 connects word lookup to saved vocabulary cards; Phase 7 adds local manga OCR; Phase 8 connects page cropping, OCR, reading, and card thumbnails; Phases L1-L4 add local Ollama explanations, level guardrails, practice examples, casual-speech explanations, and the frontend AI Tutor panel; Phase L5 adds short-clip Whisper transcription and masked transcript review; Phase 9a adds FSRS review scheduling for vocabulary cards.
 
 ## Stack
 
@@ -13,7 +13,9 @@ Local-first Japanese reading tutor for a beginner learner. Phase 0 established t
 - python-multipart for FastAPI multipart uploads
 - React Image Crop for selecting manga speech-bubble crops
 - React and Vite (JavaScript) frontend
-- Ollama with Qwen3 4B for local Japanese explanations; planned Whisper for listening
+- Ollama with Qwen3 4B for local Japanese explanations
+- faster-whisper with CTranslate2 for local Japanese audio transcription
+- Py-FSRS (`fsrs`) for spaced-repetition scheduling
 
 ## Structure
 
@@ -21,18 +23,22 @@ Local-first Japanese reading tutor for a beginner learner. Phase 0 established t
 kotodane/
 ├── backend/
 │   ├── check_setup.py
-│   ├── db.py  (SQLite schema and persistence)
+│   ├── asr.py  (lazy faster-whisper transcription)
+│   ├── db.py  (SQLite schema, cards, and saved examples)
 │   ├── dictionary.py
 │   ├── guardrail.py  (known-level checks and retry loop)
 │   ├── llm.py
 │   ├── main.py
 │   ├── ocr.py  (lazy manga-ocr model)
 │   ├── prompts.py  (LLM prompt templates and JSON schemas)
+│   ├── review.py  (FSRS due-card scheduling and answers)
 │   ├── requirements.txt
 │   ├── test_dictionary.py
 │   ├── test_guardrail.py
+│   ├── test_cards_notes.py
 │   ├── test_l3.py
 │   ├── test_ocr.py
+│   ├── test_review.py
 │   ├── test_tokenizer.py
 │   ├── tokenizer.py
 │   └── uploads/  (saved bubble crops; created on first API import)
@@ -109,9 +115,17 @@ uvicorn main:app --reload
 
 `POST /explain` accepts `sentence`, `word`, `known_kanji`, and `known_words`, and returns `explanation_ja` plus `hint_en`. The model uses Ollama's JSON response format. Set `$env:OLLAMA_TIMEOUT_SECONDS = "180"` before starting the backend if generation times out. No additional Python package is needed for this phase.
 
+Phase L5 adds `POST /transcribe` for audio/video uploads up to 60 seconds and 50 MB. It returns timestamped Japanese segments, the same masked token objects as `/render`, and `known_words_percent` based on vocabulary saved in Cards (kana-only words are treated as known; particles and punctuation do not count toward the percentage). Install Python dependencies from `backend` with `python -m pip install -r requirements.txt`. On Windows, install FFmpeg from [ffmpeg.org/download.html](https://ffmpeg.org/download.html) using one of its linked Windows builds; extract the build and add its `bin` folder (containing `ffmpeg.exe` and `ffprobe.exe`) to `PATH`, then open a new terminal and verify with `ffmpeg -version` and `ffprobe -version`. Upload and inspect a clip in the **Listen** tab. The model loads on first transcription; set `$env:WHISPER_MODEL_SIZE = "small"` before starting the backend to select the model size (default `small`). The CPU `int8` backend avoids a separate CUDA setup.
+
+Phase L5 model details for the README: `Systran/faster-whisper-small`, approximately 486 MB, MIT license. CTranslate2 wheels support Windows x86-64 and Python 3.9+, including Python 3.13; no Python-version workaround is needed. GPU execution is optional and requires compatible CUDA/cuDNN libraries; this setup defaults to CPU `int8`.
+
+Phase 9a adds FSRS scheduling using the `fsrs` PyPI package (Py-FSRS 6.3.2, MIT; Python 3.10+, compatible with Python 3.13). Install it with `python -m pip install -r requirements.txt`. `GET /reviews/due?limit=20` lists due cards; new unscheduled cards are due immediately. `POST /reviews/answer` accepts `{"card_id": 1, "rating": 3}` where ratings 1–4 are Again, Hard, Good, and Easy. The FSRS Card JSON and its next due timestamp are stored in the existing `cards.fsrs_state` and `cards.due_at` columns. Run scheduler tests from `backend` with `python -m pytest -q test_review.py`.
+
 Phase L2 checks generated Japanese explanation text with fugashi. Kana-only words, particles, punctuation, and whitespace are allowed; unlisted kanji trigger a retry, and unknown vocabulary above the 10% default threshold also triggers a retry. `/explain` returns `tries`, `unknown_ratio`, and `passed` alongside the explanation. Retry feedback names the words or kanji to avoid. Run the mocked guardrail tests from `backend` with `python -m pytest -q test_guardrail.py`.
 
 Phase L3 adds `POST /practice` for short target-word example sentences and `POST /explain-casual` for spoken Japanese forms and sentence endings. Both use structured Ollama JSON and the L2 guardrail loop; responses include `tries`, `unknown_ratio`, and `passed`. Practice accepts `count` from 1 to 10 (default 3). Test the mocked L3 validation and guardrail paths with `python -m pytest -q test_l3.py` from `backend`.
+
+Phase L4 adds **AI explain**, **Practice sentences**, and **Explain casual speech** actions to the Reader's word lookup panel. Generated Japanese is rendered through `/render`; practice sentence words can be tapped for dictionary lookup and saved as examples on the selected card. The Cards tab lists saved examples under each card. Retryable Ollama errors and the L2 `tries`/`passed` status are shown in the panel. Check the frontend with `npm run build`; check card-note persistence from `backend` with `python -m pytest -q -p no:cacheprovider test_cards_notes.py`.
 
 Phase L1 model recommendation: use `qwen3:4b` (Q4_K_M, approximately 2.5 GB; Apache License 2.0). The 4B size and quantization suit a 6 GB GPU, though available VRAM and context usage determine GPU offload. Alternatives: `gemma3:4b` (approximately 3.3 GB; Gemma Terms of Use) supports over 140 languages; `llama3.2:3b` (approximately 2.0 GB; Llama 3.2 Community License) is lightweight, but Japanese is not among Meta's officially listed supported languages. Ollama catalog sizes and licenses: [Qwen3 4B](https://ollama.com/library/qwen3%3A4b), [Gemma 3 4B](https://ollama.com/library/gemma3%3A4b), [Llama 3.2 3B](https://ollama.com/library/llama3.2%3A3b).
 
@@ -139,6 +153,9 @@ Run the reader UI in a second PowerShell terminal with `cd frontend`, `npm insta
 - Phase L1 adds a local Ollama `/explain` endpoint with `qwen3:4b` as the default model, JSON-validated output, beginner-level Japanese constrained by the supplied known lists, and a short English hint. Qwen3 thinking is disabled for this short structured response so its output budget is used for the JSON result. Model license: Apache License 2.0.
 - Phase L2 validates `explanation_ja` against known kanji and words, retries up to three times with `avoid:` feedback, and returns the best attempt with retry metadata. Unknown kanji always cause a retry; unknown vocabulary is tolerated only within the configured ratio.
 - Phase L3 adds `/practice` and `/explain-casual`, using structured JSON prompts and the L2 guardrail. Practice checks all returned example sentences; casual-speech explanations allow quoted forms from the input sentence while still checking kanji against the learner's known list.
+- Phase L4 connects those tutor endpoints to the Reader lookup panel, renders tutor Japanese through `/render`, allows tap-to-lookup in generated sentences, and stores duplicate-safe practice examples in a migrated `cards.notes` field.
+- Phase L5 adds `POST /transcribe` and a Listen tab. faster-whisper loads lazily, FFmpeg extracts audio from accepted media, clips over 60 seconds are rejected, and each segment is masked through the existing tokenizer with a known-card-word percentage.
+- Phase 9a uses Py-FSRS (`fsrs`) to serialize scheduler Card state into `cards.fsrs_state`, update `cards.due_at` after answers, and list unscheduled or elapsed cards from `GET /reviews/due`.
 - Reopening an existing vocabulary card with a crop updates its image path instead of creating a duplicate card.
 - CORS permits the Vite development origin `http://localhost:5173`.
 
@@ -156,4 +173,7 @@ Run the reader UI in a second PowerShell terminal with `cd frontend`, `npm insta
 - [x] Phase L1: local Ollama `/explain`
 - [x] Phase L2: level-locked guardrail loop
 - [x] Phase L3: practice sentences and casual-speech explanations
+- [x] Phase L4: frontend AI Tutor panel
+- [ ] Phase L5: Whisper audio transcription (manual 30-second clip round-trip pending) This will be added later.
+- [x] Phase 9a: FSRS review scheduling
 - [ ] Later phases: application features

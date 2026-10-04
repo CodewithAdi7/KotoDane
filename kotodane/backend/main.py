@@ -1,6 +1,9 @@
 from contextlib import asynccontextmanager
 from io import BytesIO
+import math
 from pathlib import Path
+import subprocess
+import tempfile
 from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
@@ -9,8 +12,10 @@ from pydantic import BaseModel, Field
 from PIL import Image, UnidentifiedImageError
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
+from asr import AsrModelLoadError, AsrTranscriptionError, transcribe
 
 from db import (
+    add_card_note,
     create_or_tap_card,
     get_cards,
     get_known_kanji,
@@ -29,6 +34,7 @@ from llm import (
     generate_practice as generate_practice_with_llm,
 )
 from ocr import OcrModelLoadError, recognize
+from review import answer_card as answer_review_card, list_due_cards
 from tokenizer import mask_text
 
 
@@ -71,6 +77,15 @@ class CardCreate(BaseModel):
     image_path: str | None = None
 
 
+class CardNoteCreate(BaseModel):
+    note: str = Field(min_length=1)
+
+
+class ReviewAnswer(BaseModel):
+    card_id: int = Field(gt=0)
+    rating: int = Field(ge=1, le=4)
+
+
 class ExplainRequest(BaseModel):
     sentence: str = Field(min_length=1)
     word: str = Field(min_length=1)
@@ -89,6 +104,91 @@ class CasualExplainRequest(BaseModel):
     sentence: str = Field(min_length=1)
     known_kanji: list[str]
     known_words: list[str]
+
+
+MAX_TRANSCRIBE_UPLOAD_BYTES = 50 * 1024 * 1024
+TRANSCRIBE_EXTENSIONS = {
+    ".wav", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".flac",
+    ".mp4", ".mov", ".mkv", ".webm", ".avi", ".mpeg", ".mpg",
+}
+NON_CONTENT_POS = {"空白", "補助記号", "記号", "助詞", "助動詞"}
+
+
+def _contains_kanji(text: str) -> bool:
+    return any(
+        0x3400 <= ord(char) <= 0x4DBF
+        or 0x4E00 <= ord(char) <= 0x9FFF
+        or 0xF900 <= ord(char) <= 0xFAFF
+        or 0x20000 <= ord(char) <= 0x3134F
+        for char in text
+    )
+
+
+def _known_word_percent(tokens: list[dict], known_words: set[str]) -> float:
+    content = [token for token in tokens if token.get("pos") not in NON_CONTENT_POS]
+    if not content:
+        return 100.0
+    known_count = sum(
+        1 for token in content
+        if token.get("lemma") in known_words
+        or token.get("surface") in known_words
+        or not _contains_kanji(token.get("surface", ""))
+    )
+    return round(100 * known_count / len(content), 1)
+
+
+async def _store_transcription_upload(file: UploadFile, destination: Path) -> None:
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in TRANSCRIBE_EXTENSIONS:
+        await file.close()
+        raise HTTPException(
+            status_code=415,
+            detail="Upload an audio or video file (WAV, MP3, M4A, OGG, FLAC, MP4, MOV, MKV, or WebM).",
+        )
+    total = 0
+    try:
+        with destination.open("wb") as output:
+            while chunk := await file.read(1024 * 1024):
+                total += len(chunk)
+                if total > MAX_TRANSCRIBE_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="Audio and video uploads are limited to 50 MB.")
+                output.write(chunk)
+    finally:
+        await file.close()
+    if total == 0:
+        raise HTTPException(status_code=400, detail="The uploaded media file is empty.")
+
+
+def _probe_duration(media_path: Path) -> float:
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of",
+             "default=noprint_wrappers=1:nokey=1", str(media_path)],
+            check=True, capture_output=True, text=True, timeout=20,
+        )
+        duration = float(result.stdout.strip())
+        if not math.isfinite(duration) or duration <= 0:
+            raise ValueError("invalid media duration")
+        return duration
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail="ffprobe was not found. Install FFmpeg and add its bin folder to PATH, then restart the backend.") from exc
+    except (subprocess.SubprocessError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Could not read this media file. Check that it is a valid audio or video clip.") from exc
+
+
+def _extract_audio(media_path: Path, audio_path: Path) -> None:
+    try:
+        subprocess.run(
+            ["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(media_path),
+             "-vn", "-ac", "1", "-ar", "16000", "-f", "wav", str(audio_path)],
+            check=True, capture_output=True, text=True, timeout=90,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail="ffmpeg was not found. Install FFmpeg and add its bin folder to PATH, then restart the backend.") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=400, detail="Audio extraction took too long. Try a shorter clip.") from exc
+    except subprocess.CalledProcessError as exc:
+        raise HTTPException(status_code=400, detail="FFmpeg could not extract audio from this file.") from exc
 
 
 app.add_middleware(
@@ -253,6 +353,39 @@ async def ocr(file: UploadFile = File(...)):
     return {"text": text}
 
 
+@app.post("/transcribe")
+async def post_transcribe(file: UploadFile = File(...)):
+    """Transcribe up to 60 seconds of uploaded audio/video and return masked segments."""
+    with tempfile.TemporaryDirectory(prefix="kotodane-asr-") as temp_dir:
+        media_path = Path(temp_dir) / f"upload{Path(file.filename or '').suffix.lower()}"
+        audio_path = Path(temp_dir) / "audio.wav"
+        await _store_transcription_upload(file, media_path)
+        duration = await run_in_threadpool(_probe_duration, media_path)
+        if duration > 60:
+            raise HTTPException(status_code=413, detail="Clips must be 60 seconds or shorter.")
+        await run_in_threadpool(_extract_audio, media_path, audio_path)
+        try:
+            raw_segments = await run_in_threadpool(transcribe, str(audio_path))
+        except AsrModelLoadError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except AsrTranscriptionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="Speech recognition failed unexpectedly.") from exc
+
+    known_kanji = set(get_known_kanji())
+    known_words = {card["lemma"] for card in get_cards()}
+    segments = []
+    for segment in raw_segments:
+        tokens = mask_text(segment["text"], known_kanji)
+        segments.append({
+            **segment,
+            "tokens": tokens,
+            "known_words_percent": _known_word_percent(tokens, known_words),
+        })
+    return {"segments": segments, "duration": round(duration, 2)}
+
+
 @app.post("/images")
 async def save_image(file: UploadFile = File(...)):
     image_bytes, image_format = await read_valid_image(file)
@@ -296,6 +429,30 @@ def post_card(request: CardCreate):
     )
 
 
+@app.post("/cards/{lemma}/notes")
+def post_card_note(lemma: str, request: CardNoteCreate):
+    card = add_card_note(lemma=lemma, note=request.note)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Save this word as a card before adding examples.")
+    return {"card": card}
+
+
 @app.get("/cards")
 def cards():
     return {"cards": get_cards()}
+
+
+@app.get("/reviews/due")
+def reviews_due(limit: int = Query(default=20, ge=1, le=100)):
+    return {"cards": list_due_cards(limit=limit)}
+
+
+@app.post("/reviews/answer")
+def review_answer(request: ReviewAnswer):
+    try:
+        result = answer_review_card(request.card_id, request.rating)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Vocabulary card not found.")
+    return result
