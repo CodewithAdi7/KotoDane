@@ -13,7 +13,7 @@ Local-first Japanese reading tutor for a beginner learner. Phase 0 established t
 - python-multipart for FastAPI multipart uploads
 - React Image Crop for selecting manga speech-bubble crops
 - React and Vite (JavaScript) frontend
-- Planned local AI: manga-ocr for reading, Ollama with a local open-weight LLM for teaching, and Whisper for listening
+- Ollama with Qwen3 4B for local Japanese explanations; planned Whisper for listening
 
 ## Structure
 
@@ -82,6 +82,31 @@ Phase 3 creates `kotodane.db` in the project folder on first API startup. Use `G
 
 Install manga-ocr in the backend virtual environment with `python -m pip install manga-ocr` (or install all requirements with `python -m pip install -r requirements.txt`). The OCR model is loaded only on the first valid `POST /ocr` request, which downloads its model weights from Hugging Face if they are not cached. The endpoint accepts JPEG, PNG, and WebP images up to 5 MB. Use `/docs` to upload a cropped speech bubble.
 
+For local explanations, install Ollama on Windows from [ollama.com/download/windows](https://ollama.com/download/windows), or run this command in PowerShell:
+
+```powershell
+irm https://ollama.com/install.ps1 | iex
+```
+
+Open a new PowerShell window, then download and start the recommended model:
+
+```powershell
+ollama --version
+ollama pull qwen3:4b
+ollama run qwen3:4b
+```
+
+Exit the interactive model prompt after confirming Ollama responds. It continues serving its local API at `http://localhost:11434`. From the backend terminal, set the model and start FastAPI:
+
+```powershell
+$env:OLLAMA_MODEL = "qwen3:4b"
+uvicorn main:app --reload
+```
+
+`POST /explain` accepts `sentence`, `word`, `known_kanji`, and optional `known_words`, and returns `explanation_ja` plus `hint_en`. The model uses Ollama's JSON response format. Set `$env:OLLAMA_TIMEOUT_SECONDS = "180"` before starting the backend if generation times out. No additional Python package is needed for this phase.
+
+Phase L1 model recommendation: use `qwen3:4b` (Q4_K_M, approximately 2.5 GB; Apache License 2.0). The 4B size and quantization suit a 6 GB GPU, though available VRAM and context usage determine GPU offload. Alternatives: `gemma3:4b` (approximately 3.3 GB; Gemma Terms of Use) supports over 140 languages; `llama3.2:3b` (approximately 2.0 GB; Llama 3.2 Community License) is lightweight, but Japanese is not among Meta's officially listed supported languages. Ollama catalog sizes and licenses: [Qwen3 4B](https://ollama.com/library/qwen3%3A4b), [Gemma 3 4B](https://ollama.com/library/gemma3%3A4b), [Llama 3.2 3B](https://ollama.com/library/llama3.2%3A3b).
+
 Run the OCR sample check from `backend` after choosing a local sample image: `python test_ocr.py "C:\\path\\to\\speech-bubble.png" --expected "ここに予想される日本語"`. Omit `--expected` to print the recognition result without comparing it.
 
 In the frontend, open the **Panel** tab, upload a manga page, drag a crop around one speech bubble, and choose **Read bubble**. Correct the editable OCR text if needed, then select **Process text** to send it through the normal reader rendering and lookup flow. A crop is saved under `backend/uploads/`; vocabulary cards created from that reader text keep the crop path and show its thumbnail on the Cards tab. Uploaded crop files are local data and are excluded from Git.
@@ -103,6 +128,7 @@ Run the reader UI in a second PowerShell terminal with `cd frontend`, `npm insta
 - Phase 6 saves looked-up words through the existing `/cards` endpoint and adds a Cards view; repeat lookups reuse the lemma's card and increment its tap count.
 - Phase 7 loads the manga-ocr model lazily on first image request and accepts validated JPEG/PNG/WebP uploads up to 5 MB at `POST /ocr`.
 - Phase 8 uses React Image Crop in the Panel tab, saves the selected crop through `POST /images`, renders corrected OCR text through the existing `/render` flow, and attaches the saved crop path to vocabulary cards.
+- Phase L1 adds a local Ollama `/explain` endpoint with `qwen3:4b` as the default model, JSON-validated output, beginner-level Japanese constrained by the supplied known lists, and a short English hint. Qwen3 thinking is disabled for this short structured response so its output budget is used for the JSON result. Model license: Apache License 2.0.
 - Reopening an existing vocabulary card with a crop updates its image path instead of creating a duplicate card.
 - CORS permits the Vite development origin `http://localhost:5173`.
 
@@ -117,4 +143,5 @@ Run the reader UI in a second PowerShell terminal with `cd frontend`, `npm insta
 - [x] Phase 6: saved vocabulary cards
 - [ ] Phase 7: manga OCR endpoint (sample-image recognition check pending)
 - [ ] Phase 8: panel crop, OCR, and image-backed cards (manual OCR round-trip pending)
+- [x] Phase L1: local Ollama `/explain`
 - [ ] Later phases: application features

@@ -19,6 +19,12 @@ from db import (
     update_known_kanji,
 )
 from dictionary import get_jamdict, lookup_word
+from llm import (
+    OllamaResponseError,
+    OllamaTimeoutError,
+    OllamaUnavailableError,
+    explain as explain_with_llm,
+)
 from ocr import OcrModelLoadError, recognize
 from tokenizer import mask_text
 
@@ -62,6 +68,13 @@ class CardCreate(BaseModel):
     image_path: str | None = None
 
 
+class ExplainRequest(BaseModel):
+    sentence: str = Field(min_length=1)
+    word: str = Field(min_length=1)
+    known_kanji: list[str]
+    known_words: list[str]
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
@@ -79,6 +92,23 @@ def health():
 @app.post("/render")
 def render(request: RenderRequest):
     return {"tokens": mask_text(request.text, set(request.known_kanji))}
+
+
+@app.post("/explain")
+def post_explain(request: ExplainRequest):
+    try:
+        return explain_with_llm(
+            sentence=request.sentence,
+            word=request.word,
+            known_kanji=request.known_kanji,
+            known_words=request.known_words,
+        )
+    except OllamaUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except OllamaTimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except OllamaResponseError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 async def read_valid_image(file: UploadFile) -> tuple[bytes, str]:
