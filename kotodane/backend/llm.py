@@ -59,6 +59,7 @@ def explain(
     word: str,
     known_kanji: list[str],
     known_words: list[str] | None = None,
+    feedback: str | None = None,
 ) -> dict[str, str]:
     """Ask Ollama for a beginner-friendly explanation in the requested JSON shape."""
     model = os.getenv("OLLAMA_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
@@ -70,7 +71,9 @@ def explain(
 
     payload = {
         "model": model,
-        "messages": build_explain_messages(sentence, word, known_kanji, known_words or []),
+        "messages": build_explain_messages(
+            sentence, word, known_kanji, known_words or [], feedback=feedback
+        ),
         "format": EXPLAIN_JSON_SCHEMA,
         "stream": False,
         # Qwen3 otherwise spends the short output budget on its hidden reasoning field.

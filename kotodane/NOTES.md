@@ -23,11 +23,13 @@ kotodane/
 │   ├── check_setup.py
 │   ├── db.py  (SQLite schema and persistence)
 │   ├── dictionary.py
+│   ├── guardrail.py  (known-level checks and retry loop)
 │   ├── llm.py
 │   ├── main.py
 │   ├── ocr.py  (lazy manga-ocr model)
 │   ├── requirements.txt
 │   ├── test_dictionary.py
+│   ├── test_guardrail.py
 │   ├── test_ocr.py
 │   ├── test_tokenizer.py
 │   ├── tokenizer.py
@@ -103,7 +105,9 @@ $env:OLLAMA_MODEL = "qwen3:4b"
 uvicorn main:app --reload
 ```
 
-`POST /explain` accepts `sentence`, `word`, `known_kanji`, and optional `known_words`, and returns `explanation_ja` plus `hint_en`. The model uses Ollama's JSON response format. Set `$env:OLLAMA_TIMEOUT_SECONDS = "180"` before starting the backend if generation times out. No additional Python package is needed for this phase.
+`POST /explain` accepts `sentence`, `word`, `known_kanji`, and `known_words`, and returns `explanation_ja` plus `hint_en`. The model uses Ollama's JSON response format. Set `$env:OLLAMA_TIMEOUT_SECONDS = "180"` before starting the backend if generation times out. No additional Python package is needed for this phase.
+
+Phase L2 checks generated Japanese explanation text with fugashi. Kana-only words, particles, punctuation, and whitespace are allowed; unlisted kanji trigger a retry, and unknown vocabulary above the 10% default threshold also triggers a retry. `/explain` returns `tries`, `unknown_ratio`, and `passed` alongside the explanation. Retry feedback names the words or kanji to avoid. Run the mocked guardrail tests from `backend` with `python -m pytest -q test_guardrail.py`.
 
 Phase L1 model recommendation: use `qwen3:4b` (Q4_K_M, approximately 2.5 GB; Apache License 2.0). The 4B size and quantization suit a 6 GB GPU, though available VRAM and context usage determine GPU offload. Alternatives: `gemma3:4b` (approximately 3.3 GB; Gemma Terms of Use) supports over 140 languages; `llama3.2:3b` (approximately 2.0 GB; Llama 3.2 Community License) is lightweight, but Japanese is not among Meta's officially listed supported languages. Ollama catalog sizes and licenses: [Qwen3 4B](https://ollama.com/library/qwen3%3A4b), [Gemma 3 4B](https://ollama.com/library/gemma3%3A4b), [Llama 3.2 3B](https://ollama.com/library/llama3.2%3A3b).
 
@@ -129,6 +133,7 @@ Run the reader UI in a second PowerShell terminal with `cd frontend`, `npm insta
 - Phase 7 loads the manga-ocr model lazily on first image request and accepts validated JPEG/PNG/WebP uploads up to 5 MB at `POST /ocr`.
 - Phase 8 uses React Image Crop in the Panel tab, saves the selected crop through `POST /images`, renders corrected OCR text through the existing `/render` flow, and attaches the saved crop path to vocabulary cards.
 - Phase L1 adds a local Ollama `/explain` endpoint with `qwen3:4b` as the default model, JSON-validated output, beginner-level Japanese constrained by the supplied known lists, and a short English hint. Qwen3 thinking is disabled for this short structured response so its output budget is used for the JSON result. Model license: Apache License 2.0.
+- Phase L2 validates `explanation_ja` against known kanji and words, retries up to three times with `avoid:` feedback, and returns the best attempt with retry metadata. Unknown kanji always cause a retry; unknown vocabulary is tolerated only within the configured ratio.
 - Reopening an existing vocabulary card with a crop updates its image path instead of creating a duplicate card.
 - CORS permits the Vite development origin `http://localhost:5173`.
 
@@ -144,4 +149,5 @@ Run the reader UI in a second PowerShell terminal with `cd frontend`, `npm insta
 - [ ] Phase 7: manga OCR endpoint (sample-image recognition check pending)
 - [ ] Phase 8: panel crop, OCR, and image-backed cards (manual OCR round-trip pending)
 - [x] Phase L1: local Ollama `/explain`
+- [x] Phase L2: level-locked guardrail loop
 - [ ] Later phases: application features

@@ -19,6 +19,7 @@ from db import (
     update_known_kanji,
 )
 from dictionary import get_jamdict, lookup_word
+from guardrail import generate_within_level
 from llm import (
     OllamaResponseError,
     OllamaTimeoutError,
@@ -97,11 +98,20 @@ def render(request: RenderRequest):
 @app.post("/explain")
 def post_explain(request: ExplainRequest):
     try:
-        return explain_with_llm(
-            sentence=request.sentence,
-            word=request.word,
+        def task_fn(feedback: str):
+            return explain_with_llm(
+                sentence=request.sentence,
+                word=request.word,
+                known_kanji=request.known_kanji,
+                known_words=request.known_words,
+                feedback=feedback or None,
+            )
+
+        return generate_within_level(
+            task_fn=task_fn,
             known_kanji=request.known_kanji,
-            known_words=request.known_words,
+            # The selected target is what the learner is asking to understand.
+            known_words=[*request.known_words, request.word],
         )
     except OllamaUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

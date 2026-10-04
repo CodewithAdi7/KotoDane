@@ -33,6 +33,7 @@ def build_explain_messages(
     word: str,
     known_kanji: list[str],
     known_words: list[str],
+    feedback: str | None = None,
 ) -> list[dict[str, str]]:
     context = {
         "sentence": sentence,
@@ -40,11 +41,16 @@ def build_explain_messages(
         "known_kanji": known_kanji,
         "known_words": known_words,
     }
+    user_content = "Explain this word using the tutor rules. Learner context:\n" + json.dumps(
+        context, ensure_ascii=False
+    )
+    if feedback:
+        user_content += (
+            "\nYour previous answer was too difficult. Follow this correction exactly: "
+            + feedback
+        )
+
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": "Explain this word using the tutor rules. Learner context:\n"
-            + json.dumps(context, ensure_ascii=False),
-        },
+        {"role": "user", "content": user_content},
     ]
