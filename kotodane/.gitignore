@@ -9,6 +9,7 @@ venv/
 *.db
 *.sqlite
 *.sqlite3
+backend/uploads/
 
 # Environment and editor files
 .env

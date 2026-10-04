@@ -2,7 +2,7 @@
 
 ## Summary
 
-Local-first Japanese reading tutor for a beginner learner. Phase 0 established the project structure; Phase 1 added Japanese tokenization and kanji-aware rendering; Phase 2 added local dictionary lookup; Phase 3 added persistent known-kanji and vocabulary-card endpoints; Phase 4 added the reader UI; Phase 5 added word lookup and known-kanji management; Phase 6 connects word lookup to saved vocabulary cards; Phase 7 adds local manga OCR.
+Local-first Japanese reading tutor for a beginner learner. Phase 0 established the project structure; Phase 1 added Japanese tokenization and kanji-aware rendering; Phase 2 added local dictionary lookup; Phase 3 added persistent known-kanji and vocabulary-card endpoints; Phase 4 added the reader UI; Phase 5 added word lookup and known-kanji management; Phase 6 connects word lookup to saved vocabulary cards; Phase 7 adds local manga OCR; Phase 8 connects page cropping, OCR, reading, and card thumbnails.
 
 ## Stack
 
@@ -11,6 +11,7 @@ Local-first Japanese reading tutor for a beginner learner. Phase 0 established t
 - jamdict and jamdict-data for dictionary lookup
 - manga-ocr for Japanese text recognition from images
 - python-multipart for FastAPI multipart uploads
+- React Image Crop for selecting manga speech-bubble crops
 - React and Vite (JavaScript) frontend
 - Planned local AI: manga-ocr for reading, Ollama with a local open-weight LLM for teaching, and Whisper for listening
 
@@ -29,7 +30,8 @@ kotodane/
 │   ├── test_dictionary.py
 │   ├── test_ocr.py
 │   ├── test_tokenizer.py
-│   └── tokenizer.py
+│   ├── tokenizer.py
+│   └── uploads/  (saved bubble crops; created on first API import)
 ├── frontend/
 │   ├── .env
 │   ├── index.html
@@ -82,6 +84,8 @@ Install manga-ocr in the backend virtual environment with `python -m pip install
 
 Run the OCR sample check from `backend` after choosing a local sample image: `python test_ocr.py "C:\\path\\to\\speech-bubble.png" --expected "ここに予想される日本語"`. Omit `--expected` to print the recognition result without comparing it.
 
+In the frontend, open the **Panel** tab, upload a manga page, drag a crop around one speech bubble, and choose **Read bubble**. Correct the editable OCR text if needed, then select **Process text** to send it through the normal reader rendering and lookup flow. A crop is saved under `backend/uploads/`; vocabulary cards created from that reader text keep the crop path and show its thumbnail on the Cards tab. Uploaded crop files are local data and are excluded from Git.
+
 Phase 7 model details for the README: model ID `kha-white/manga-ocr-base`; project/model license Apache-2.0; first-run model download is approximately 444 MB (upstream describes it as about 400 MB). The upstream project notes that the newest Python release can lag behind PyTorch, but the current PyTorch Windows support range includes Python 3.13. `manga-ocr` and PyTorch installed successfully in this project's Python 3.13.7 environment. If `manga-ocr` itself cannot install in the Python 3.13 environment, use either of these alternatives:
 
 1. Torchless ONNX port: replace `manga-ocr` with `manga-ocr-torchless` in `requirements.txt`, then run `python -m pip install -r requirements.txt`. It keeps the `from manga_ocr import MangaOcr` API and downloads about 400 MB of ONNX model files on first use.
@@ -98,6 +102,8 @@ Run the reader UI in a second PowerShell terminal with `cd frontend`, `npm insta
 - Phase 4 introduced the React reader page and Phase 5 adds simple Reader/Kanji tabs, tap-to-lookup details, and known-kanji controls using the existing API.
 - Phase 6 saves looked-up words through the existing `/cards` endpoint and adds a Cards view; repeat lookups reuse the lemma's card and increment its tap count.
 - Phase 7 loads the manga-ocr model lazily on first image request and accepts validated JPEG/PNG/WebP uploads up to 5 MB at `POST /ocr`.
+- Phase 8 uses React Image Crop in the Panel tab, saves the selected crop through `POST /images`, renders corrected OCR text through the existing `/render` flow, and attaches the saved crop path to vocabulary cards.
+- Reopening an existing vocabulary card with a crop updates its image path instead of creating a duplicate card.
 - CORS permits the Vite development origin `http://localhost:5173`.
 
 ## Phases-completed checklist
@@ -110,4 +116,5 @@ Run the reader UI in a second PowerShell terminal with `cd frontend`, `npm insta
 - [x] Phase 5: tap-to-lookup and kanji manager
 - [x] Phase 6: saved vocabulary cards
 - [ ] Phase 7: manga OCR endpoint (sample-image recognition check pending)
+- [ ] Phase 8: panel crop, OCR, and image-backed cards (manual OCR round-trip pending)
 - [ ] Later phases: application features

@@ -1,10 +1,13 @@
 from contextlib import asynccontextmanager
 from io import BytesIO
+from pathlib import Path
+from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from PIL import Image, UnidentifiedImageError
+from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from db import (
@@ -35,6 +38,10 @@ SUPPORTED_IMAGE_TYPES = {
     "image/png": "PNG",
     "image/webp": "WEBP",
 }
+IMAGE_EXTENSIONS = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
+UPLOADS_DIR = Path(__file__).resolve().parent / "uploads"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 
 class RenderRequest(BaseModel):
@@ -74,8 +81,7 @@ def render(request: RenderRequest):
     return {"tokens": mask_text(request.text, set(request.known_kanji))}
 
 
-@app.post("/ocr")
-async def ocr(file: UploadFile = File(...)):
+async def read_valid_image(file: UploadFile) -> tuple[bytes, str]:
     content_type = (file.content_type or "").split(";", maxsplit=1)[0].lower()
     expected_format = SUPPORTED_IMAGE_TYPES.get(content_type)
     if expected_format is None:
@@ -110,6 +116,13 @@ async def ocr(file: UploadFile = File(...)):
             detail="The image contents do not match the declared file type.",
         )
 
+    return image_bytes, image_format
+
+
+@app.post("/ocr")
+async def ocr(file: UploadFile = File(...)):
+    image_bytes, _ = await read_valid_image(file)
+
     try:
         text = await run_in_threadpool(recognize, image_bytes)
     except OcrModelLoadError as exc:
@@ -127,6 +140,18 @@ async def ocr(file: UploadFile = File(...)):
         ) from exc
 
     return {"text": text}
+
+
+@app.post("/images")
+async def save_image(file: UploadFile = File(...)):
+    image_bytes, image_format = await read_valid_image(file)
+    filename = f"{uuid4().hex}{IMAGE_EXTENSIONS[image_format]}"
+    image_path = UPLOADS_DIR / filename
+    try:
+        await run_in_threadpool(image_path.write_bytes, image_bytes)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="Could not save the cropped image.") from exc
+    return {"image_path": f"/uploads/{filename}"}
 
 
 @app.get("/lookup")

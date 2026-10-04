@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ReactCrop from "react-image-crop";
+import "react-image-crop/dist/ReactCrop.css";
 import "./App.css";
 
 const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/$/, "");
@@ -9,7 +11,10 @@ async function request(path, options = {}) {
   try {
     response = await fetch(`${API_URL}${path}`, {
       ...options,
-      headers: { ...(options.body ? { "Content-Type": "application/json" } : {}), ...options.headers },
+      headers: {
+        ...(options.body && !(options.body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
+        ...options.headers,
+      },
     });
   } catch {
     throw new Error("Could not reach the backend. Start the FastAPI server and try again.");
@@ -56,6 +61,7 @@ function App() {
   const [cards, setCards] = useState([]);
   const [cardsLoading, setCardsLoading] = useState(false);
   const [cardsError, setCardsError] = useState("");
+  const [activeImagePath, setActiveImagePath] = useState(null);
 
   const refreshKanji = useCallback(async () => {
     const result = await request("/known-kanji");
@@ -129,6 +135,27 @@ function App() {
     }
   }
 
+  async function processPanelText(panelText, imagePath) {
+    setError("");
+    setRendering(true);
+    try {
+      const kanji = await refreshKanji();
+      const result = await request("/render", {
+        method: "POST",
+        body: JSON.stringify({ text: panelText, known_kanji: kanji }),
+      });
+      setText(panelText);
+      setTokens(result.tokens || []);
+      setActiveImagePath(imagePath);
+      setPage("reader");
+    } catch (reason) {
+      setError(reason.message);
+      throw reason;
+    } finally {
+      setRendering(false);
+    }
+  }
+
   async function openLookup(token, tokenIndex) {
     const word = token.lemma || token.surface;
     const sentence = sentenceForToken(tokens, tokenIndex, text) || token.surface;
@@ -151,6 +178,7 @@ function App() {
             reading: token.reading_hiragana || word,
             meaning,
             sentence,
+            image_path: activeImagePath,
           }),
         });
         setSaveState({ status: "saved", created: result.created, card: result.card });
@@ -224,6 +252,7 @@ function App() {
         </a>
         <nav className="tabs" aria-label="Main navigation">
           <button className={page === "reader" ? "tab is-active" : "tab"} onClick={() => setPage("reader")}>Reader</button>
+          <button className={page === "panel" ? "tab is-active" : "tab"} onClick={() => setPage("panel")}>Panel</button>
           <button className={page === "kanji" ? "tab is-active" : "tab"} onClick={() => setPage("kanji")}>Kanji</button>
           <button className={page === "cards" ? "tab is-active" : "tab"} onClick={() => setPage("cards")}>Cards</button>
         </nav>
@@ -239,7 +268,7 @@ function App() {
           </section>
           <section className="reader-card">
             <div className="card-heading"><label htmlFor="japanese-text">Your Japanese text</label><span className="input-hint">A sentence, paragraph, or page</span></div>
-            <textarea id="japanese-text" className="text-input" value={text} onChange={(event) => setText(event.target.value)} placeholder="ここに日本語の文章を貼り付けてください。" spellCheck="false" />
+            <textarea id="japanese-text" className="text-input" value={text} onChange={(event) => { setText(event.target.value); setActiveImagePath(null); }} placeholder="ここに日本語の文章を貼り付けてください。" spellCheck="false" />
             <div className="input-footer"><span>Japanese text stays on this device</span><span>{text.length} characters</span></div>
             <div className="action-row"><p className="known-note">{loading ? "Loading your kanji…" : `${knownKanji.length} kanji marked as known`}. Change these in the Kanji tab.</p><button className="render-button" onClick={handleRender} disabled={rendering || loading}>{rendering ? <><span className="spinner" />Rendering</> : "Render text"}</button></div>
           </section>
@@ -262,16 +291,18 @@ function App() {
           </section>
           <footer className="page-footer"><span>Changes are saved on this device.</span><span className="footer-dot">·</span><button className="text-button" onClick={() => setPage("reader")}>Back to reader</button></footer>
         </main>
-      ) : (
+      ) : page === "cards" ? (
         <main className="cards-layout">
           <section className="intro"><p className="eyebrow">YOUR SAVED VOCABULARY</p><h1>Words to <span>keep.</span></h1><p className="intro-copy">Words you look up are saved here with their reading, meaning, and the sentence they came from.</p></section>
           <section className="cards-card">
             <div className="manager-heading"><div><p className="eyebrow">VOCABULARY CARDS</p><h2>{cards.length} saved {cards.length === 1 ? "word" : "words"}</h2></div><button className="secondary-button" onClick={loadCards} disabled={cardsLoading}>Refresh</button></div>
             {cardsError && <ErrorMessage message={cardsError} />}
-            {cardsLoading && cards.length === 0 ? <p className="lookup-status">Loading saved cards…</p> : cards.length === 0 ? <div className="manager-empty"><span className="empty-symbol">語</span><p>No saved words yet.</p><span>Tap a word in Reader to save it here.</span></div> : <div className="saved-card-list">{cards.map((card) => <article className="saved-card" key={card.id}><div className="saved-card-heading"><div><h3 lang="ja">{card.lemma}</h3><span lang="ja">{card.reading}</span></div><span className="tap-count">Tapped {card.tap_count} {card.tap_count === 1 ? "time" : "times"}</span></div><p className="saved-meaning">{card.meaning || "Meaning not found in the local dictionary."}</p><p className="saved-sentence" lang="ja">{card.sentence}</p></article>)}</div>}
+            {cardsLoading && cards.length === 0 ? <p className="lookup-status">Loading saved cards…</p> : cards.length === 0 ? <div className="manager-empty"><span className="empty-symbol">語</span><p>No saved words yet.</p><span>Tap a word in Reader to save it here.</span></div> : <div className="saved-card-list">{cards.map((card) => <article className="saved-card" key={card.id}>{card.image_path && <img className="card-thumbnail" src={`${API_URL}${card.image_path}`} alt={`Cropped manga panel for ${card.lemma}`} loading="lazy" />}<div className="saved-card-heading"><div><h3 lang="ja">{card.lemma}</h3><span lang="ja">{card.reading}</span></div><span className="tap-count">Tapped {card.tap_count} {card.tap_count === 1 ? "time" : "times"}</span></div><p className="saved-meaning">{card.meaning || "Meaning not found in the local dictionary."}</p><p className="saved-sentence" lang="ja">{card.sentence}</p></article>)}</div>}
           </section>
           <footer className="page-footer"><span>Saved on this device.</span><span className="footer-dot">·</span><button className="text-button" onClick={() => setPage("reader")}>Back to reader</button></footer>
         </main>
+      ) : (
+        <PanelPage onProcessText={processPanelText} />
       )}
     </div>
   );
@@ -279,6 +310,127 @@ function App() {
 
 function ErrorMessage({ message }) {
   return <div className="message message-error" role="alert"><span className="message-icon">!</span><div><strong>Something needs attention</strong><p>{message}</p></div></div>;
+}
+
+async function makeCropBlob(image, crop) {
+  if (!image || !crop?.width || !crop?.height) throw new Error("Drag a crop box around one speech bubble first.");
+  const scaleX = image.naturalWidth / image.width;
+  const scaleY = image.naturalHeight / image.height;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(crop.width * scaleX));
+  canvas.height = Math.max(1, Math.round(crop.height * scaleY));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("This browser could not create the cropped image.");
+  context.drawImage(
+    image,
+    crop.x * scaleX,
+    crop.y * scaleY,
+    crop.width * scaleX,
+    crop.height * scaleY,
+    0,
+    0,
+    canvas.width,
+    canvas.height,
+  );
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not create the cropped image.")), "image/png");
+  });
+}
+
+function PanelPage({ onProcessText }) {
+  const imageRef = useRef(null);
+  const [sourceFile, setSourceFile] = useState(null);
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [crop, setCrop] = useState();
+  const [completedCrop, setCompletedCrop] = useState(null);
+  const [cropBlob, setCropBlob] = useState(null);
+  const [ocrText, setOcrText] = useState("");
+  const [reading, setReading] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!sourceFile) {
+      setSourceUrl("");
+      return undefined;
+    }
+    const url = URL.createObjectURL(sourceFile);
+    setSourceUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [sourceFile]);
+
+  function chooseImage(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setError("Choose a JPEG, PNG, or WebP image.");
+      event.target.value = "";
+      return;
+    }
+    setSourceFile(file);
+    event.target.value = "";
+    setCrop(undefined);
+    setCompletedCrop(null);
+    setCropBlob(null);
+    setOcrText("");
+    setError("");
+  }
+
+  async function readBubble() {
+    setError("");
+    setReading(true);
+    try {
+      const blob = await makeCropBlob(imageRef.current, completedCrop);
+      setCropBlob(blob);
+      const form = new FormData();
+      form.append("file", blob, "speech-bubble.png");
+      const result = await request("/ocr", { method: "POST", body: form });
+      setOcrText(result.text || "");
+      if (!result.text?.trim()) setError("No text was recognized. Try a tighter crop around the bubble.");
+    } catch (reason) {
+      setError(reason.message);
+    } finally {
+      setReading(false);
+    }
+  }
+
+  async function processText() {
+    setError("");
+    if (!ocrText.trim()) {
+      setError("Read a bubble and check its text before processing.");
+      return;
+    }
+    setProcessing(true);
+    try {
+      const blob = cropBlob || await makeCropBlob(imageRef.current, completedCrop);
+      const form = new FormData();
+      form.append("file", blob, "speech-bubble.png");
+      const saved = await request("/images", { method: "POST", body: form });
+      await onProcessText(ocrText, saved.image_path);
+    } catch (reason) {
+      setError(reason.message);
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  return <main className="panel-layout">
+    <section className="intro"><p className="eyebrow">READ FROM A MANGA PANEL</p><h1>Crop a bubble. <span>Read it.</span></h1><p className="intro-copy">Choose a page image, drag a box around one speech bubble, and let the local OCR read it.</p></section>
+    <section className="panel-card">
+      <div className="manager-heading"><div><p className="eyebrow">IMAGE INPUT</p><h2>Choose a page</h2></div><label className="secondary-button upload-control">{sourceFile ? "Choose another image" : "Upload image"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseImage} /></label></div>
+      {!sourceUrl ? <div className="panel-empty"><span className="empty-symbol">絵</span><p>Start with a manga page or panel image.</p><span>Images are processed by the local backend.</span></div> : <>
+        <p className="crop-instruction">Drag the crop handles to select a single speech bubble.</p>
+        <div className="crop-stage"><ReactCrop crop={crop} onChange={(pixelCrop) => setCrop(pixelCrop)} onComplete={(pixelCrop) => setCompletedCrop(pixelCrop)} keepSelection>
+          <img ref={imageRef} src={sourceUrl} alt="Selected manga page. Drag a box over one bubble to crop it." onLoad={() => { setCompletedCrop(null); setCrop(undefined); }} />
+        </ReactCrop></div>
+        <div className="panel-action-row"><p className="panel-note">The crop is sent to your local `/ocr` endpoint.</p><button className="render-button" onClick={readBubble} disabled={reading || processing}>{reading ? <><span className="spinner" />Reading</> : "Read bubble"}</button></div>
+      </>}
+      {ocrText !== "" && <div className="ocr-result"><label htmlFor="ocr-text">Recognized text — edit any OCR errors</label><textarea id="ocr-text" className="text-input" lang="ja" value={ocrText} onChange={(event) => setOcrText(event.target.value)} spellCheck="false" /></div>}
+      {error && <ErrorMessage message={error} />}
+      <div className="panel-process-row"><p className="panel-note">Process sends this text through the existing kanji masking and reading view.</p><button className="render-button" onClick={processText} disabled={!ocrText.trim() || processing || reading}>{processing ? <><span className="spinner" />Processing</> : "Process text"}</button></div>
+    </section>
+    <footer className="page-footer"><span>Your crop is saved with cards created from this text.</span><span className="footer-dot">·</span><span>Offline after setup</span></footer>
+  </main>;
 }
 
 function LookupPanel({ token, data, loading, error, saveState, showOriginal, onShowOriginal, onClose }) {

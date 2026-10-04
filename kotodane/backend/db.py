@@ -178,5 +178,13 @@ def create_or_tap_card(
             card = connection.execute(
                 _CARD_SELECT + " WHERE cards.word_id = ?", (word_id,)
             ).fetchone()
+        elif image_path is not None:
+            connection.execute(
+                "UPDATE cards SET image_path = ? WHERE word_id = ?",
+                (image_path, word_id),
+            )
+            card = connection.execute(
+                _CARD_SELECT + " WHERE cards.word_id = ?", (word_id,)
+            ).fetchone()
 
     return {"card": _card_from_row(card), "created": created}
