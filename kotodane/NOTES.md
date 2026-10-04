@@ -23,6 +23,7 @@ kotodane/
 │   ├── llm.py
 │   ├── main.py
 │   ├── requirements.txt
+│   ├── test_dictionary.py
 │   ├── test_tokenizer.py
 │   └── tokenizer.py
 ├── frontend/  (empty in Phase 0)
@@ -57,14 +58,18 @@ python check_setup.py
 
 Phase 1 adds `POST /render`, which accepts `{"text": "...", "known_kanji": ["私"]}` and returns tokenizer results. Run tokenizer tests from `backend` with `python -m pytest test_tokenizer.py` (install `pytest` in the virtual environment if needed).
 
+Phase 2 adds `GET /lookup?word=食べる` for exact local dictionary lookup. Run `python test_dictionary.py` from `backend` to check word and kanji results.
+
 ## Decisions
 
 - Phase 0 contains the health endpoint and dependency setup check.
-- Phase 1 adds tokenization and rendering; the database, dictionary, and LLM modules remain placeholders for later phases.
+- Phase 1 adds tokenization and rendering; the database and LLM modules remain placeholders for later phases.
+- Phase 2 loads one cached Jamdict instance at API startup and returns up to five common-first word entries plus KANJIDIC2 details for kanji in the query.
 - CORS permits the Vite development origin `http://localhost:5173`.
 
 ## Phases-completed checklist
 
 - [x] Phase 0: project setup
 - [x] Phase 1: tokenizer and `/render`
+- [x] Phase 2: dictionary and `/lookup`
 - [ ] Later phases: application features
